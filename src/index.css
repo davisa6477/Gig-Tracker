@@ -101,7 +101,7 @@
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; background: var(--background); color: var(--foreground); transition: background 0.2s; -webkit-tap-highlight-color: transparent; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; background: var(--background); color: var(--foreground); transition: background 0.2s; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
 
 #app { max-width: 480px; margin: 0 auto; min-height: 100dvh; position: relative; }
 
