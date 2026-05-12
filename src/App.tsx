@@ -70,14 +70,18 @@ export default function App() {
       },
       onMouseUp: () => { clearTimeout(helpTimer.current); },
       onMouseLeave: () => { clearTimeout(helpTimer.current); },
-      onTouchStart: () => { 
-        isLongPressActive.current = false;
-        helpTimer.current = setTimeout(() => {
-          setHelpModal({ title, body });
-          isLongPressActive.current = true;
-        }, 1000); 
-      },
-      onTouchEnd: () => { clearTimeout(helpTimer.current); },
+onTouchStart: (e: React.TouchEvent) => { 
+  e.preventDefault();
+  isLongPressActive.current = false;
+  helpTimer.current = setTimeout(() => {
+    setHelpModal({ title, body });
+    isLongPressActive.current = true;
+  }, 1000); 
+},
+onTouchEnd: (e: React.TouchEvent) => { 
+  e.preventDefault();
+  clearTimeout(helpTimer.current); 
+},
       style: { cursor: 'help' } as React.CSSProperties
     };
   };
