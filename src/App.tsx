@@ -76,7 +76,7 @@ onTouchStart: (e: React.TouchEvent) => {
   helpTimer.current = setTimeout(() => {
     setHelpModal({ title, body });
     isLongPressActive.current = true;
-  }, 1000); 
+  }, 500); 
 },
 onTouchEnd: () => { 
   if (!isLongPressActive.current) {
