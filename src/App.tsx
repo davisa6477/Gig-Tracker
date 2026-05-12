@@ -78,9 +78,10 @@ onTouchStart: (e: React.TouchEvent) => {
     isLongPressActive.current = true;
   }, 1000); 
 },
-onTouchEnd: (e: React.TouchEvent) => { 
-  e.preventDefault();
-  clearTimeout(helpTimer.current); 
+onTouchEnd: () => { 
+  if (!isLongPressActive.current) {
+    clearTimeout(helpTimer.current);
+  }
 },
       style: { cursor: 'help' } as React.CSSProperties
     };
