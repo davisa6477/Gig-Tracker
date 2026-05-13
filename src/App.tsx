@@ -341,13 +341,12 @@ const syncToSheets = (entries: { gig: string; date: string; amount: number; mile
 	entriesToSync = gigs.map(g => {
 	  const amount = hist.find(w => w.key === weekKey)?.data?.[g.id]?.[effKey] || 0;
 	  const miles = hist.find(w => w.key === weekKey)?.miles?.[g.id]?.[effKey] || 0;
-	
-	  // Find which Monday starts the calendar week for this gig's cycle
-	  const gigDow = jsToOur(selectedDate.getDay()); // 0=Mon, 6=Sun
+
+	  const sd = dateOnly(effKey);
+	  const gigDow = jsToOur(sd.getDay());
 	  const gigStartDow = DAY_IDX[g.weekStart];
 	  const gigDaysBack = (gigDow - gigStartDow + 7) % 7;
-	  const gigCycleStart = addDays(selectedDate, -gigDaysBack);
-	  // The tab is named after the Sunday of the Mon-Sun week that contains the cycle start
+	  const gigCycleStart = addDays(sd, -gigDaysBack);
 	  const cycleStartDow = jsToOur(gigCycleStart.getDay());
 	  const tabMonday = addDays(gigCycleStart, -cycleStartDow);
 	  const tabSunday = addDays(tabMonday, 6);
