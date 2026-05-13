@@ -6,7 +6,7 @@ const VENMO_USERNAME = 'Aaron-Davis-6477';
 const VENMO_DEEP = `venmo://paycharge?txn=pay&recipients=${VENMO_USERNAME}&amount=0&note=Gig+Tracker+Beta+Tip`;
 const VENMO_WEB = `https://venmo.com/${VENMO_USERNAME}`;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']; 
 const DAY_FULL = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const DAY_IDX: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
 function jsToOur(d: number) { return (d + 6) % 7; }
