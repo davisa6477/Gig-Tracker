@@ -252,15 +252,16 @@ export default function App() {
   };
 
   // --- Google Sheets sync ---
-  const syncToSheets = (entries: { gig: string; date: string; amount: number; miles: number; tabName: string }[]) => {
-    const url = import.meta.env.VITE_SHEETS_URL;
-    if (!url || entries.length === 0) return;
-    fetch(url, {
-      method: 'POST',
-      body: JSON.stringify({ entries }),
-      headers: { 'Content-Type': 'text/plain' }
-    }).catch(() => {}); // fail silently — app works offline
-  };
+const syncToSheets = (entries: { gig: string; date: string; amount: number; miles: number; tabName: string }[]) => {
+  const url = import.meta.env.VITE_SHEETS_URL;
+  if (!url || entries.length === 0) return;
+  fetch(url, {
+    method: 'POST',
+    body: JSON.stringify({ entries }),
+    headers: { 'Content-Type': 'text/plain' },
+    redirect: 'follow'
+  }).catch(() => {});
+};
 
   // Actions
   const updateTotals = () => {
