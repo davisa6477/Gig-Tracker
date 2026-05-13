@@ -337,7 +337,8 @@ const syncToSheets = (entries: { gig: string; date: string; amount: number; mile
         const tabName = (cycleEnd.getMonth() + 1).toString().padStart(2, '0') + '/' +
           cycleEnd.getDate().toString().padStart(2, '0') + '/' +
           cycleEnd.getFullYear().toString().slice(2);
-        const dateStr = (selectedDate.getMonth() + 1) + '/' + selectedDate.getDate() + '/' + selectedDate.getFullYear();
+	const parts = effKey.split('-');
+	const dateStr = parseInt(parts[1]) + '/' + parseInt(parts[2]) + '/' + parts[0];
 
         entriesToSync = gigs.map(g => {
           const amount = hist.find(w => w.key === weekKey)?.data?.[g.id]?.[effKey] || 0;
