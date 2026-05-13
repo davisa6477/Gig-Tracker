@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { CircleHelp } from 'lucide-react';
 
-// Constants from provided code
 const VENMO_USERNAME = 'Aaron-Davis-6477';
 const VENMO_DEEP = `venmo://paycharge?txn=pay&recipients=${VENMO_USERNAME}&amount=0&note=Gig+Tracker+Beta+Tip`;
 const VENMO_WEB = `https://venmo.com/${VENMO_USERNAME}`;
@@ -11,7 +10,6 @@ const DAY_FULL = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Satur
 const DAY_IDX: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
 function jsToOur(d: number) { return (d + 6) % 7; }
 
-// Date Helpers
 const fmtDateKey = (d: Date) => d.getFullYear() + '-' + (d.getMonth() + 1).toString().padStart(2, '0') + '-' + d.getDate().toString().padStart(2, '0');
 const fmtShort = (d: Date) => MONTHS[d.getMonth()] + ' ' + d.getDate();
 const dateOnly = (d: Date | string) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
@@ -26,7 +24,6 @@ const getCycleDates = (ws: string, payWed: Date) => {
 };
 
 export default function App() {
-  // --- STATE ---
   const [inputDateKey, setInputDateKey] = useState(() => fmtDateKey(dateOnly(new Date())));
   const [theme, setThemeState] = useState(() => localStorage.getItem('theme') || 'auto');
   const [currentScreen, setCurrentScreen] = useState('daily');
@@ -35,13 +32,13 @@ export default function App() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [reportWeekIndex, setReportWeekIndex] = useState(0);
 
-  // Modal/Confirm states
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [fName, setFName] = useState('');
   const [fBehavior, setFBehavior] = useState('replace');
   const [fWeekStart, setFWeekStart] = useState('Mon');
   const [fCutoff, setFCutoff] = useState('00:00');
+  const [fMiles, setFMiles] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmMsg, setConfirmMsg] = useState('');
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -58,56 +55,134 @@ export default function App() {
   const helpTimer = useRef<any>(null);
   const isLongPressActive = useRef(false);
 
-  // Long Press Handler
+  const [trackingGigId, setTrackingGigId] = useState<number | null>(null);
+  const [tripDistance, setTripDistance] = useState(0);
+  const watchId = useRef<number | null>(null);
+  const lastPos = useRef<{ lat: number; lng: number } | null>(null);
+  const wakeLock = useRef<any>(null);
+  const [isGpsSupported] = useState(() => 'geolocation' in navigator);
+
+  const requestWakeLock = async () => {
+    try {
+      if ('wakeLock' in navigator && (navigator as any).wakeLock) {
+        wakeLock.current = await (navigator as any).wakeLock.request('screen');
+      }
+    } catch (err) {
+      console.error('Wake Lock error:', err);
+    }
+  };
+
+  const releaseWakeLock = () => {
+    if (wakeLock.current) {
+      wakeLock.current.release().then(() => { wakeLock.current = null; });
+    }
+  };
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && trackingGigId !== null) requestWakeLock();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [trackingGigId]);
+
+  const isInputToday = inputDateKey === fmtDateKey(new Date());
+
+  const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const R = 3958.8;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
+
+  const stopTracking = (gigId: number, distance: number) => {
+    if (watchId.current !== null) { navigator.geolocation.clearWatch(watchId.current); watchId.current = null; }
+    releaseWakeLock();
+    lastPos.current = null;
+    if (distance > 0) {
+      setWeekHistory(prev => {
+        const hist = [...prev];
+        const d = dateOnly(new Date());
+        const effKey = fmtDateKey(d);
+        const refMon = addDays(d, -jsToOur(d.getDay()));
+        const weekKey = fmtDateKey(refMon);
+        let idx = hist.findIndex(w => w.key === weekKey);
+        if (idx === -1) { hist.push({ key: weekKey, startDate: refMon.toISOString(), data: {}, miles: {}, exported: false }); idx = hist.length - 1; }
+        const entry = { ...hist[idx], miles: { ...hist[idx].miles } };
+        if (!entry.miles[gigId]) entry.miles[gigId] = {};
+        const currentMiles = parseFloat(entry.miles[gigId][effKey] as any) || 0;
+        entry.miles[gigId][effKey] = Number((currentMiles + distance).toFixed(1));
+        hist[idx] = entry;
+        return hist;
+      });
+      showNotification(`Trip ended: ${distance.toFixed(1)} miles added to ${gigs.find(g => g.id === gigId)?.name}.`, 'success');
+    }
+    setTrackingGigId(null);
+    setTripDistance(0);
+  };
+
+  const startTracking = (gigId: number) => {
+    if (trackingGigId !== null) stopTracking(trackingGigId, tripDistance);
+    setTrackingGigId(gigId);
+    setTripDistance(0);
+    lastPos.current = null;
+    requestWakeLock();
+    watchId.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        const { latitude: lat, longitude: lng } = pos.coords;
+        if (lastPos.current) {
+          const delta = getDistance(lastPos.current.lat, lastPos.current.lng, lat, lng);
+          if (delta > 0.005) { setTripDistance(prev => Number((prev + delta).toFixed(2))); lastPos.current = { lat, lng }; }
+        } else { lastPos.current = { lat, lng }; }
+      },
+      (err) => { console.error('GPS error:', err); showNotification('GPS Error: Could not track location.', 'error'); stopTracking(gigId, 0); },
+      { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
+    );
+  };
+
+  useEffect(() => {
+    const lockOrientation = async () => {
+      try { if ('orientation' in screen && (screen.orientation as any).lock) await (screen.orientation as any).lock('portrait'); } catch (e) {}
+    };
+    lockOrientation();
+    return () => { if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current); };
+  }, []);
+
   const longPress = (title: string, body: string) => {
     return {
-      onMouseDown: () => { 
+      onMouseDown: () => {
         isLongPressActive.current = false;
-        helpTimer.current = setTimeout(() => {
-          setHelpModal({ title, body });
-          isLongPressActive.current = true;
-        }, 1000); 
+        helpTimer.current = setTimeout(() => { setHelpModal({ title, body }); isLongPressActive.current = true; if ('vibrate' in navigator) navigator.vibrate(50); }, 500);
       },
       onMouseUp: () => { clearTimeout(helpTimer.current); },
       onMouseLeave: () => { clearTimeout(helpTimer.current); },
-onTouchStart: (e: React.TouchEvent) => { 
-  e.preventDefault();
-  isLongPressActive.current = false;
-  helpTimer.current = setTimeout(() => {
-    setHelpModal({ title, body });
-    isLongPressActive.current = true;
-  }, 500); 
-},
-onTouchEnd: () => { 
-  if (!isLongPressActive.current) {
-    clearTimeout(helpTimer.current);
-  }
-},
+      onContextMenu: (e: React.MouseEvent) => { e.preventDefault(); },
+      onTouchStart: (e: React.TouchEvent) => {
+        isLongPressActive.current = false;
+        helpTimer.current = setTimeout(() => { setHelpModal({ title, body }); isLongPressActive.current = true; if ('vibrate' in navigator) navigator.vibrate(50); }, 500);
+      },
+      onTouchMove: () => { clearTimeout(helpTimer.current); },
+      onTouchEnd: () => { clearTimeout(helpTimer.current); },
       style: { cursor: 'help' } as React.CSSProperties
     };
   };
 
-  const HelpIcon = () => (
-    <CircleHelp className="help-icon" size="1.2em" strokeWidth={2.5} />
-  );
+  const HelpIcon = () => (<CircleHelp className="help-icon" size="1.2em" strokeWidth={2.5} />);
 
-  // Persistence
   useEffect(() => { localStorage.setItem('theme', theme); applyTheme(); }, [theme]);
   useEffect(() => { localStorage.setItem('gigs', JSON.stringify(gigs)); }, [gigs]);
   useEffect(() => { localStorage.setItem('weekHistory', JSON.stringify(weekHistory)); }, [weekHistory]);
 
   const applyTheme = () => {
     const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme:dark)').matches;
-    const isDark = theme === 'dark' || (theme === 'auto' && prefersDark);
-    document.documentElement.classList.toggle('dark', isDark);
+    document.documentElement.classList.toggle('dark', theme === 'dark' || (theme === 'auto' && prefersDark));
   };
 
   const getEffectiveDate = (date: Date, cutoff: string) => {
     const d = new Date(date);
     const [h, m] = cutoff.split(':').map(Number);
-    if (d.getHours() < h || (d.getHours() === h && d.getMinutes() < m)) {
-      d.setDate(d.getDate() - 1);
-    }
+    if (d.getHours() < h || (d.getHours() === h && d.getMinutes() < m)) d.setDate(d.getDate() - 1);
     return dateOnly(d);
   };
 
@@ -119,63 +194,79 @@ onTouchEnd: () => {
     return Number((parseFloat(week?.data?.[id]?.[dateKey] as any) || 0).toFixed(2));
   };
 
+  const getMilesForDate = (id: number, dateKey: string) => {
+    const d = dateOnly(dateKey);
+    const refMon = addDays(d, -jsToOur(d.getDay()));
+    const week = weekHistory.find(w => w.key === fmtDateKey(refMon));
+    return Number((parseFloat(week?.miles?.[id]?.[dateKey] as any) || 0).toFixed(1));
+  };
+
   const getCycleTotal = (id: number) => {
     const gig = gigs.find(g => g.id === id); if (!gig) return 0;
     const d = dateOnly(inputDateKey);
-    const effDow = jsToOur(d.getDay());
-    const startDow = DAY_IDX[gig.weekStart];
-    const daysBack = (effDow - startDow + 7) % 7;
+    const daysBack = (jsToOur(d.getDay()) - DAY_IDX[gig.weekStart] + 7) % 7;
     const cycleStart = addDays(d, -daysBack);
-    const dates = []; for (let i = 0; i < 7; i++) dates.push(addDays(cycleStart, i));
-    const keys = new Set(dates.map(date => fmtDateKey(date)));
+    const keys = new Set(Array.from({ length: 7 }, (_, i) => fmtDateKey(addDays(cycleStart, i))));
     let total = 0;
-    weekHistory.forEach(w => {
-      if (w.data[id]) Object.entries(w.data[id]).forEach(([k, v]) => { if (keys.has(k)) total = Number((total + (parseFloat(v as any) || 0)).toFixed(2)); });
-    });
+    weekHistory.forEach(w => { if (w.data[id]) Object.entries(w.data[id]).forEach(([k, v]) => { if (keys.has(k)) total = Number((total + (parseFloat(v as any) || 0)).toFixed(2)); }); });
     return total;
   };
+
+  const getCycleMilesTotal = (id: number) => {
+    const gig = gigs.find(g => g.id === id); if (!gig) return 0;
+    const d = dateOnly(inputDateKey);
+    const daysBack = (jsToOur(d.getDay()) - DAY_IDX[gig.weekStart] + 7) % 7;
+    const cycleStart = addDays(d, -daysBack);
+    const keys = new Set(Array.from({ length: 7 }, (_, i) => fmtDateKey(addDays(cycleStart, i))));
+    let total = 0;
+    weekHistory.forEach(w => { if (w.miles?.[id]) Object.entries(w.miles[id]).forEach(([k, v]) => { if (keys.has(k)) total = Number((total + (parseFloat(v as any) || 0)).toFixed(1)); }); });
+    return total;
+  };
+
+  const getCycleEf = (id: number) => { const e = getCycleTotal(id); const m = getCycleMilesTotal(id); return m > 0 ? e / m : 0; };
 
   const isInCycle = (gig: any) => {
     const d = dateOnly(inputDateKey);
     const refMon = addDays(d, -jsToOur(d.getDay()));
-    const { dates } = getCycleDates(gig.weekStart, getPayWed(refMon));
-    return dates.some(date => fmtDateKey(date) === inputDateKey);
+    return getCycleDates(gig.weekStart, getPayWed(refMon)).dates.some(date => fmtDateKey(date) === inputDateKey);
   };
 
   const getSelectLabel = (d: Date) => DAY_FULL[jsToOur(d.getDay())] + ', ' + MONTHS[d.getMonth()] + ' ' + d.getDate();
 
   const handleCurrencyInput = (e: React.FormEvent<HTMLInputElement>, id: number) => {
     const input = e.currentTarget;
-    if (offendingInputIds.includes(id)) {
-      setOffendingInputIds(prev => prev.filter(x => x !== id));
-    }
+    if (offendingInputIds.includes(id)) setOffendingInputIds(prev => prev.filter(x => x !== id));
     const isNegative = input.value.includes('-');
     let digits = input.value.replace(/\D/g, '');
-    if (!digits) {
-      input.value = isNegative ? '-' : '';
-      return;
-    }
+    if (!digits) { input.value = isNegative ? '-' : ''; return; }
     while (digits.length < 3) digits = '0' + digits;
     const iPart = digits.slice(0, -2).replace(/^0+(?!$)/, '');
-    const dPart = digits.slice(-2);
-    input.value = (isNegative ? '-' : '') + (iPart || '0') + '.' + dPart;
+    input.value = (isNegative ? '-' : '') + (iPart || '0') + '.' + digits.slice(-2);
+  };
+
+  const handleMilesInput = (e: React.FormEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    input.value = input.value.replace(/[^0-9.]/g, '');
+    const parts = input.value.split('.');
+    if (parts.length > 2) input.value = parts[0] + '.' + parts.slice(1).join('');
+  };
+
+  // --- Google Sheets sync ---
+  const syncToSheets = (entries: { gig: string; date: string; amount: number; miles: number; tabName: string }[]) => {
+    const url = import.meta.env.VITE_SHEETS_URL;
+    if (!url || entries.length === 0) return;
+    fetch(url, {
+      method: 'POST',
+      body: JSON.stringify({ entries }),
+      headers: { 'Content-Type': 'text/plain' }
+    }).catch(() => {}); // fail silently — app works offline
   };
 
   // Actions
-  const syncToSheets = (entries: { gig: string; date: string; amount: number; tabName: string }[]) => {
-  const url = import.meta.env.VITE_SHEETS_URL;
-  if (!url) return;
-  fetch(url, {
-    method: 'POST',
-    body: JSON.stringify({ entries }),
-    headers: { 'Content-Type': 'text/plain' }
-  }).catch(() => {});
-};
   const updateTotals = () => {
     if (isLongPressActive.current) return;
     if (updateTimer.current) clearTimeout(updateTimer.current);
 
-    // Validate for negative results
     const offending: number[] = [];
     const selectedDate = dateOnly(inputDateKey);
     const effKey = inputDateKey;
@@ -186,11 +277,9 @@ onTouchEnd: () => {
       const inp = document.getElementById(`inp-${g.id}`) as HTMLInputElement;
       const val = parseFloat(inp?.value || '') || 0;
       if (val === 0 && (!inp || inp.value === '')) return;
-
       const week = weekHistory.find(w => w.key === weekKey);
       const ex = parseFloat(week?.data?.[g.id]?.[effKey] as any) || 0;
       const result = g.behavior === 'add' ? Number((ex + val).toFixed(2)) : Number(val.toFixed(2));
-
       if (result < 0) offending.push(g.id);
     });
 
@@ -205,6 +294,8 @@ onTouchEnd: () => {
     setOffendingInputIds([]);
     setUpdateState('saving');
     setTimeout(() => {
+      let entriesToSync: { gig: string; date: string; amount: number; tabName: string }[] = [];
+
       setWeekHistory(prev => {
         const hist = [...prev];
         const selectedDate = dateOnly(inputDateKey);
@@ -213,42 +304,54 @@ onTouchEnd: () => {
         const weekKey = fmtDateKey(refMon);
 
         gigs.forEach(g => {
-          const inp = document.getElementById(`inp-${g.id}`) as HTMLInputElement;
-          const val = parseFloat(inp?.value || '') || 0;
-          if (val === 0) return;
-
           let idx = hist.findIndex(w => w.key === weekKey);
           if (idx === -1) {
-            hist.push({ key: weekKey, startDate: refMon.toISOString(), data: {}, exported: false });
+            hist.push({ key: weekKey, startDate: refMon.toISOString(), data: {}, miles: {}, exported: false });
             idx = hist.length - 1;
           }
-          const entry = { ...hist[idx], data: { ...hist[idx].data } };
-          if (!entry.data[g.id]) entry.data[g.id] = {};
-          const ex = parseFloat(entry.data[g.id][effKey]) || 0;
-          entry.data[g.id][effKey] = g.behavior === 'add' ? Number((ex + val).toFixed(2)) : Number(val.toFixed(2));
+          const entry = { ...hist[idx], data: { ...hist[idx].data }, miles: { ...hist[idx].miles } };
+
+          const inp = document.getElementById(`inp-${g.id}`) as HTMLInputElement;
+          const miInp = document.getElementById(`mi-${g.id}`) as HTMLInputElement;
+          const val = parseFloat(inp?.value || '') || 0;
+          const mVal = parseFloat(miInp?.value || '') || 0;
+
+          if (val !== 0 || (inp && inp.value !== '')) {
+            if (!entry.data[g.id]) entry.data[g.id] = {};
+            const ex = parseFloat(entry.data[g.id][effKey]) || 0;
+            entry.data[g.id][effKey] = g.behavior === 'add' ? Number((ex + val).toFixed(2)) : Number(val.toFixed(2));
+            if (inp) inp.value = '';
+          }
+
+          if (mVal !== 0 || (miInp && miInp.value !== '')) {
+            if (!entry.miles[g.id]) entry.miles[g.id] = {};
+            const exM = parseFloat(entry.miles[g.id][effKey]) || 0;
+            entry.miles[g.id][effKey] = g.behavior === 'add' ? Number((exM + mVal).toFixed(1)) : Number(mVal.toFixed(1));
+            if (miInp) miInp.value = '';
+          }
+
           hist[idx] = entry;
-          if (inp) inp.value = '';
         });
+
+        // Build sync entries from freshly updated hist
+        const cycleEnd = addDays(refMon, 6);
+        const tabName = (cycleEnd.getMonth() + 1).toString().padStart(2, '0') + '/' +
+          cycleEnd.getDate().toString().padStart(2, '0') + '/' +
+          cycleEnd.getFullYear().toString().slice(2);
+        const dateStr = (selectedDate.getMonth() + 1) + '/' + selectedDate.getDate() + '/' + selectedDate.getFullYear();
+
+        entriesToSync = gigs.map(g => {
+          const amount = hist.find(w => w.key === weekKey)?.data?.[g.id]?.[effKey] || 0;
+          const miles = hist.find(w => w.key === weekKey)?.miles?.[g.id]?.[effKey] || 0;
+          return { gig: g.name, date: dateStr, amount, miles, tabName };
+        }).filter(e => e.amount > 0);
+
         return hist;
       });
-      setUpdateState('saved'); updateTimer.current = setTimeout(() => setUpdateState('idle'), 2000); 
-      const syncEntries: { gig: string; date: string; amount: number; tabName: string }[] = [];
-gigs.forEach(g => {
-  const d = dateOnly(inputDateKey);
-  const refMon = addDays(d, -jsToOur(d.getDay()));
-  const cycleEnd = addDays(refMon, 6);
-  const tabName = (cycleEnd.getMonth() + 1).toString().padStart(2, '0') + '/' +
-    cycleEnd.getDate().toString().padStart(2, '0') + '/' +
-    cycleEnd.getFullYear().toString().slice(2);
-  const amount = weekHistory.find((w: any) => w.key === fmtDateKey(refMon))?.data?.[g.id]?.[inputDateKey] || 0;
-  if (amount > 0) syncEntries.push({
-    gig: g.name,
-    date: (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear(),
-    amount,
-    tabName
-  });
-});
-syncToSheets(syncEntries);
+
+      setUpdateState('saved');
+      updateTimer.current = setTimeout(() => setUpdateState('idle'), 2000);
+      setTimeout(() => syncToSheets(entriesToSync), 100);
     }, 400);
   };
 
@@ -261,21 +364,9 @@ syncToSheets(syncEntries);
     if (isLongPressActive.current) return;
     const today = dateOnly(new Date());
     const payWed = getPayWed(dateOnly(new Date(w.startDate)));
-    
-    // Check if all cycles in this week are complete
     const uniqueWeekStarts = Array.from(new Set(gigs.map(g => g.weekStart)));
-    const activeCycles = uniqueWeekStarts.filter(ws => {
-      const { cycleEnd } = getCycleDates(ws as string, payWed);
-      return today <= cycleEnd;
-    });
-
-    if (activeCycles.length > 0) {
-      setHelpModal({
-        title: 'Export Restricted',
-        body: 'Exporting is disabled until the current pay cycle is complete. Reports can only be generated after all work days for this period have passed to ensure final totals are accurate.'
-      });
-      return;
-    }
+    const activeCycles = uniqueWeekStarts.filter(ws => { const { cycleEnd } = getCycleDates(ws as string, payWed); return today <= cycleEnd; });
+    if (activeCycles.length > 0) { setHelpModal({ title: 'Export Restricted', body: 'Exporting is disabled until the current pay cycle is complete.' }); return; }
 
     const win = window as any; if (!win.XLSX) { showNotification('XLSX not loaded', 'error'); return; }
     const XL = win.XLSX; const rows: any[][] = []; const groups: any = {};
@@ -283,20 +374,22 @@ syncToSheets(syncEntries);
     const payL = `Paid Wed ${fmtShort(payWed)}`;
     Object.keys(groups).forEach((ws, i) => {
       const { cycleStart, cycleEnd, dates } = getCycleDates(ws, payWed);
-      if (i > 0) rows.push([]); rows.push([payL], [`Work period: ${fmtShort(cycleStart)} – ${fmtShort(cycleEnd)}`], ['Gig', ...dates.map(d => `${DAY_SHORT[jsToOur(d.getDay())]} ${fmtShort(d)}`), 'Total']);
-      const colT = new Array(7).fill(0); let gT = 0;
+      if (i > 0) rows.push([]);
+      rows.push([payL], [`Work period: ${fmtShort(cycleStart)} – ${fmtShort(cycleEnd)}`], ['Gig', ...dates.map(d => `${DAY_SHORT[jsToOur(d.getDay())]} ${fmtShort(d)}`), 'Total']);
+      const colT = new Array(7).fill(0); const colM = new Array(7).fill(0); let gT = 0; let gM = 0;
       groups[ws].forEach((g: any) => {
         const r: any[] = [g.name]; let rT = 0;
-        dates.forEach((d, j) => {
-          const v = parseFloat(w.data[g.id]?.[fmtDateKey(d)] as any) || 0;
-          r.push(v);
-          rT = Number((rT + v).toFixed(2));
-          colT[j] = Number((colT[j] + v).toFixed(2));
-          gT = Number((gT + v).toFixed(2));
-        });
+        dates.forEach((d, j) => { const v = parseFloat(w.data[g.id]?.[fmtDateKey(d)] as any) || 0; r.push(v); rT = Number((rT + v).toFixed(2)); colT[j] = Number((colT[j] + v).toFixed(2)); gT = Number((gT + v).toFixed(2)); });
         r.push(rT); rows.push(r);
+        if (g.miles) {
+          const mR: any[] = [`  Miles`]; let rM = 0;
+          dates.forEach((d, j) => { const v = parseFloat(w.miles?.[g.id]?.[fmtDateKey(d)] as any) || 0; mR.push(v); rM = Number((rM + v).toFixed(1)); colM[j] = Number((colM[j] + v).toFixed(1)); gM = Number((gM + v).toFixed(1)); });
+          mR.push(rM); rows.push(mR);
+          rows.push([`  $/mile`, ...dates.map(d => { const e = parseFloat(w.data?.[g.id]?.[fmtDateKey(d)] as any) || 0; const m = parseFloat(w.miles?.[g.id]?.[fmtDateKey(d)] as any) || 0; return m > 0 ? (e / m).toFixed(2) : '-'; }), (rM > 0 ? (rT / rM).toFixed(2) : '-')]);
+        }
       });
-      rows.push(['Total', ...colT, gT]);
+      rows.push(['Total Earned', ...colT, gT]);
+      if (gM > 0) { rows.push(['Total Miles', ...colM, gM]); rows.push(['Average $/mile', ...dates.map((d, j) => colM[j] > 0 ? (colT[j] / colM[j]).toFixed(2) : '-'), (gM > 0 ? (gT / gM).toFixed(2) : '-')]); }
     });
     const wb = XL.utils.book_new(); const ws_sheet = XL.utils.aoa_to_sheet(rows);
     XL.utils.book_append_sheet(wb, ws_sheet, 'Weekly Report'); XL.writeFile(wb, `GigTracker_${payL.replace(/\s/g, '_')}.xlsx`);
@@ -308,28 +401,11 @@ syncToSheets(syncEntries);
     if (isLongPressActive.current) return;
     const today = dateOnly(new Date());
     const payWed = getPayWed(dateOnly(new Date(w.startDate)));
-    
-    // Check if any cycle in this week is still active
     const uniqueWeekStarts = Array.from(new Set(gigs.map(g => g.weekStart)));
-    const activeCycles = uniqueWeekStarts.filter(ws => {
-      const { cycleEnd } = getCycleDates(ws as string, payWed);
-      return today <= cycleEnd;
-    });
-
-    if (activeCycles.length > 0) {
-      setHelpModal({
-        title: 'Delete Restricted',
-        body: 'Deletion is disabled until the current pay cycle is complete. This ensures you do not accidentally remove records while your work period and pay totals are still live.'
-      });
-      return;
-    }
-
+    const activeCycles = uniqueWeekStarts.filter(ws => { const { cycleEnd } = getCycleDates(ws as string, payWed); return today <= cycleEnd; });
+    if (activeCycles.length > 0) { setHelpModal({ title: 'Delete Restricted', body: 'Deletion is disabled until the current pay cycle is complete.' }); return; }
     setPendingDeleteWeekKey(w.key);
-    let msg = 'Are you sure you want to delete this week? This action cannot be undone.';
-    if (!w.exported) {
-      msg = 'This report has not been exported yet. Are you sure you want to delete it permanently?';
-    }
-    setConfirmMsg(msg);
+    setConfirmMsg(w.exported ? 'Are you sure you want to delete this week? This action cannot be undone.' : 'This report has not been exported yet. Are you sure you want to delete it permanently?');
     setConfirmBtnText('Delete');
     setConfirmOpen(true);
   };
@@ -340,31 +416,21 @@ syncToSheets(syncEntries);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const ts = new Date().toISOString().replace('T', '_').slice(0, 16).replace(/:/g, '-');
-    a.download = `GigTracker_Backup_${ts}.json`;
+    a.download = `GigTracker_Backup_${new Date().toISOString().replace('T', '_').slice(0, 16).replace(/:/g, '-')}.json`;
     a.click();
     URL.revokeObjectURL(url);
     showNotification('Backup file created and download started.', 'success');
   };
 
   const handleRestoreFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
+    const f = e.target.files?.[0]; if (!f) return;
     const r = new FileReader();
     r.onload = (ev) => {
       try {
         const b = JSON.parse(ev.target?.result as string);
-        if (b.gigs && b.weekHistory) {
-          setPendingRestoreData(b);
-          setConfirmMsg('Are you sure you want to restore from this backup? This will overwrite all your current configurations and history.');
-          setConfirmBtnText('Restore Data');
-          setConfirmOpen(true);
-        } else {
-          showNotification('Invalid backup file format.', 'error');
-        }
-      } catch (err) {
-        showNotification('Error parsing backup file.', 'error');
-      }
+        if (b.gigs && b.weekHistory) { setPendingRestoreData(b); setConfirmMsg('Are you sure you want to restore from this backup? This will overwrite all your current configurations and history.'); setConfirmBtnText('Restore Data'); setConfirmOpen(true); }
+        else showNotification('Invalid backup file format.', 'error');
+      } catch (err) { showNotification('Error parsing backup file.', 'error'); }
       e.target.value = '';
     };
     r.readAsText(f);
@@ -372,6 +438,11 @@ syncToSheets(syncEntries);
 
   return (
     <div id="app">
+      <div className="landscape-warning">
+        <i className="ti ti-device-mobile-rotated"></i>
+        <h2>Portrait Mode Recommended</h2>
+        <p>Please rotate your device for the best experience.</p>
+      </div>
       <div className="topbar">
         <span className="topbar-title">{SCREENS.find(s => s.id === currentScreen)?.label}</span>
         <button className="ham-btn" onClick={() => setIsDrawerOpen(true)}><i className="ti ti-menu-2"></i></button>
@@ -401,19 +472,9 @@ syncToSheets(syncEntries);
           ) : (
             <>
               <div className="daily-header-row">
-                <span className="section-label has-help" {...longPress('Select Date', 'Choose a date to view or enter earnings for that day. You can edit any day within your current pay cycle.')}>
-                  Earnings for <HelpIcon />
-                </span>
-                <select 
-                  className="date-select" 
-                  value={inputDateKey} 
-                  onChange={e => setInputDateKey(e.target.value)}
-                >
-                  {[0, 1, 2, 3, 4, 5, 6].map(offset => {
-                    const d = addDays(dateOnly(new Date()), -offset);
-                    const k = fmtDateKey(d);
-                    return <option key={k} value={k}>{getSelectLabel(d)}{offset === 0 ? ' (Today)' : ''}</option>;
-                  })}
+                <span className="section-label has-help" {...longPress('Select Date', 'Choose a date to view or enter earnings for that day. You can edit any day within your current pay cycle.')}>Earnings for <HelpIcon /></span>
+                <select className="date-select" value={inputDateKey} onChange={e => setInputDateKey(e.target.value)}>
+                  {[0, 1, 2, 3, 4, 5, 6].map(offset => { const d = addDays(dateOnly(new Date()), -offset); const k = fmtDateKey(d); return <option key={k} value={k}>{getSelectLabel(d)}{offset === 0 ? ' (Today)' : ''}</option>; })}
                 </select>
               </div>
               {gigs.map(g => (
@@ -424,19 +485,52 @@ syncToSheets(syncEntries);
                         <label htmlFor={`inp-${g.id}`}>{g.name}</label>
                         <span className="behavior-indicator has-help" {...longPress('Calculation Style', g.behavior === 'add' ? "'Add' increases your current total by the amount entered." : "'Replace' sets the total for that day to exactly the amount entered.")}>{g.behavior === 'add' ? 'Add' : 'Replace'} <HelpIcon /></span>
                       </div>
-                      <span className="daily-total-label">Current Amount: ${getValueForDate(g.id, inputDateKey).toFixed(2)}</span>
+                      <div className="daily-stats-row">
+                        <span className="daily-total-label">Earned: ${getValueForDate(g.id, inputDateKey).toFixed(2)}</span>
+                        {g.miles && (
+                          <>
+                            <span className="daily-miles-label">Miles: {getMilesForDate(g.id, inputDateKey).toFixed(1)} mi</span>
+                            {getMilesForDate(g.id, inputDateKey) > 0 && (
+                              <span style={{ fontSize: '10px', opacity: 0.5, marginLeft: 'auto', fontWeight: 600 }}>
+                                ${(getValueForDate(g.id, inputDateKey) / getMilesForDate(g.id, inputDateKey)).toFixed(2)}/mi
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      {g.miles && (
+                        <div className="gps-track-bar">
+                          {isGpsSupported ? (
+                            <button
+                              className={`gps-btn ${trackingGigId === g.id ? 'active' : ''}`}
+                              disabled={!isInputToday && trackingGigId !== g.id}
+                              onClick={() => trackingGigId === g.id ? stopTracking(g.id, tripDistance) : startTracking(g.id)}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onTouchStart={(e) => e.stopPropagation()}
+                            >
+                              <i className={`ti ${trackingGigId === g.id ? 'ti-square-rounded-x' : 'ti-player-play'}`}></i>
+                              {trackingGigId === g.id ? `Stop Trip: ${tripDistance.toFixed(1)} mi` : 'Start Trip'}
+                            </button>
+                          ) : (
+                            <div className="gps-unavailable">GPS tracking disabled</div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      id={`inp-${g.id}`}
-                      className={offendingInputIds.includes(g.id) ? 'invalid-input' : ''}
-                      placeholder="0.00"
-                      onInput={(e) => handleCurrencyInput(e, g.id)}
-                      autoComplete="off"
-                      onMouseDown={(e) => e.stopPropagation()}
-                      onTouchStart={(e) => e.stopPropagation()}
-                    />
+                    <div className="input-group">
+                      <div className="side-input">
+                        {g.miles && (
+                          <div className="sub-input">
+                            <span className="sub-label">Miles</span>
+                            <input type="text" inputMode="decimal" id={`mi-${g.id}`} placeholder="0.0" onInput={handleMilesInput} autoComplete="off" onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()} />
+                          </div>
+                        )}
+                        <div className="sub-input">
+                          <span className="sub-label">Amount</span>
+                          <input type="text" inputMode="numeric" id={`inp-${g.id}`} className={offendingInputIds.includes(g.id) ? 'invalid-input' : ''} placeholder="0.00" onInput={(e) => handleCurrencyInput(e, g.id)} autoComplete="off" onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()} />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -452,7 +546,15 @@ syncToSheets(syncEntries);
                 <div className="totals-header has-help" {...longPress('Cycle Totals', 'Sum total of your earnings for the current pay cycle (e.g. Wed to Tue).')}>Current cycle totals <HelpIcon /></div>
                 {gigs.map((g, idx, arr) => (
                   <div key={g.id} className="totals-row" style={{ fontWeight: idx === arr.length - 1 && arr.length > 1 ? 700 : 400 }}>
-                    <span>{g.name} {!isInCycle(g) && <span style={{ fontSize: '10px', opacity: 0.55 }}>(prev cycle)</span>}</span>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span>{g.name} {!isInCycle(g) && <span style={{ fontSize: '10px', opacity: 0.55 }}>(prev cycle)</span>}</span>
+                      {g.miles && (
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          <span style={{ fontSize: '11px', opacity: 0.65 }}>{getCycleMilesTotal(g.id).toFixed(1)} mi</span>
+                          <span style={{ fontSize: '10px', opacity: 0.45, fontWeight: 600, background: 'var(--bg2)', padding: '1px 4px', borderRadius: '4px' }}>${getCycleEf(g.id).toFixed(2)}/mi</span>
+                        </div>
+                      )}
+                    </div>
                     <span style={{ fontVariantNumeric: 'tabular-nums' }}>${getCycleTotal(g.id).toFixed(2)}</span>
                   </div>
                 ))}
@@ -470,7 +572,7 @@ syncToSheets(syncEntries);
               <div className="gig-card-top">
                 <span className="gig-name">{g.name}</span>
                 <div className="gig-actions">
-                  <button className="icon-btn" onClick={() => { setEditingId(g.id); setFName(g.name); setFBehavior(g.behavior); setFWeekStart(g.weekStart); setFCutoff(g.cutoff); setModalOpen(true); }}><i className="ti ti-edit"></i></button>
+                  <button className="icon-btn" onClick={() => { setEditingId(g.id); setFName(g.name); setFBehavior(g.behavior); setFWeekStart(g.weekStart); setFCutoff(g.cutoff); setFMiles(g.miles || false); setModalOpen(true); }}><i className="ti ti-edit"></i></button>
                   <button className="icon-btn danger" onClick={() => { setDeletingId(g.id); setConfirmMsg(`Remove "${g.name}"?`); setConfirmBtnText('Remove'); setConfirmOpen(true); }}><i className="ti ti-trash"></i></button>
                 </div>
               </div>
@@ -478,10 +580,11 @@ syncToSheets(syncEntries);
                 <span className="badge">{g.behavior === 'add' ? 'Additive' : 'Replace'}</span>
                 <span className="badge">Week: {g.weekStart}</span>
                 <span className="badge">Cutoff: {g.cutoff === '00:00' ? 'midnight' : g.cutoff}</span>
+                {g.miles && <span className="badge" style={{ background: 'var(--total-bg)', color: 'var(--text3)' }}>Miles tracked</span>}
               </div>
             </div>
           ))}
-          <button className="add-btn" onClick={() => { setEditingId(null); setFName(''); setFBehavior('replace'); setFWeekStart('Mon'); setFCutoff('00:00'); setModalOpen(true); }}><i className="ti ti-plus"></i> Add gig</button>
+          <button className="add-btn" onClick={() => { setEditingId(null); setFName(''); setFBehavior('replace'); setFWeekStart('Mon'); setFCutoff('00:00'); setFMiles(false); setModalOpen(true); }}><i className="ti ti-plus"></i> Add gig</button>
         </div>
       )}
 
@@ -495,43 +598,54 @@ syncToSheets(syncEntries);
               <>
                 <div className="report-nav">
                   <button className="report-nav-btn" disabled={reportWeekIndex >= weekHistory.length - 1} onClick={() => setReportWeekIndex(reportWeekIndex + 1)}><i className="ti ti-chevron-left"></i></button>
-                  <div className="report-week-label has-help" {...longPress('Pay Weekly Summary', 'This screen shows your earnings grouped by pay schedule. All groups in this report will be paid on the Wednesday date shown above.')}>{payL} <HelpIcon /> {!w.exported && <><br /><span className="unexported-badge">Not exported</span></>}</div>
+                  <div className="report-week-label has-help" {...longPress('Pay Weekly Summary', 'This screen shows your earnings grouped by pay schedule.')}>{payL} <HelpIcon /> {!w.exported && <><br /><span className="unexported-badge">Not exported</span></>}</div>
                   <button className="report-nav-btn" disabled={reportWeekIndex <= 0} onClick={() => setReportWeekIndex(reportWeekIndex - 1)}><i className="ti ti-chevron-right"></i></button>
                 </div>
                 <div className="report-action-row">
-                  <button className="report-action-btn has-help" {...longPress('Export Report', 'Download a CSV/Excel file of your earnings for this cycle. Note: This is only available once all cycles in the period have ended.')} onClick={() => handleExport(w)}><i className="ti ti-download"></i> Export <HelpIcon /></button>
-                  <button className="report-action-btn has-help" style={{ background: 'var(--danger-bg)', color: 'var(--danger-text)', borderColor: 'var(--danger-border)' }} {...longPress('Delete Report', 'Permanently remove this weekly record. Note: This is only available once all cycles in the period have ended.')} onClick={() => handleInitiateDeleteWeek(w)}><i className="ti ti-trash"></i> Delete <HelpIcon /></button>
+                  <button className="report-action-btn has-help" {...longPress('Export Report', 'Download a CSV/Excel file of your earnings for this cycle.')} onClick={() => handleExport(w)}><i className="ti ti-download"></i> Export <HelpIcon /></button>
+                  <button className="report-action-btn has-help" style={{ background: 'var(--danger-bg)', color: 'var(--danger-text)', borderColor: 'var(--danger-border)' }} {...longPress('Delete Report', 'Permanently remove this weekly record.')} onClick={() => handleInitiateDeleteWeek(w)}><i className="ti ti-trash"></i> Delete <HelpIcon /></button>
                 </div>
                 {Object.keys(groups).map(ws => {
                   const items = groups[ws]; const { cycleStart, cycleEnd, dates } = getCycleDates(ws, payW);
                   const colT = new Array(7).fill(0); let grand = 0;
                   return (
                     <div className="cycle-group" key={ws}>
-                      <div className="cycle-group-pay">{payL}</div><div className="cycle-group-range has-help" {...longPress('Schedule Details', 'Gigs in this table follow the same work period and pay cycle. The "Total" column reflects earnings for these specific dates.')}>Work: {fmtShort(cycleStart)} – {fmtShort(cycleEnd)} <HelpIcon /></div>
+                      <div className="cycle-group-pay">{payL}</div>
+                      <div className="cycle-group-range has-help" {...longPress('Schedule Details', 'Gigs in this table follow the same work period and pay cycle.')}>Work: {fmtShort(cycleStart)} – {fmtShort(cycleEnd)} <HelpIcon /></div>
                       <div className="report-table-wrap">
                         <table>
                           <thead>
-                            <tr>
-                              <th>Gig</th>
-                              {dates.map(d => <th key={d.getTime()}>{DAY_SHORT[jsToOur(d.getDay())]}<br />{fmtShort(d)}</th>)}
-                              <th>Total</th>
-                            </tr>
+                            <tr><th>Gig</th>{dates.map(d => <th key={d.getTime()}>{DAY_SHORT[jsToOur(d.getDay())]}<br />{fmtShort(d)}</th>)}<th>Total</th></tr>
                           </thead>
                           <tbody>
                             {items.map((g: any) => {
-                              let rT = 0;
+                              let rT = 0; let rM = 0;
                               return (
-                                <tr key={g.id}>
-                                  <td>{g.name}</td>
-                                  {dates.map((d, i) => {
-                                    const v = parseFloat(w.data[g.id]?.[fmtDateKey(d)] as any) || 0;
-                                    rT = Number((rT + v).toFixed(2));
-                                    colT[i] = Number((colT[i] + v).toFixed(2));
-                                    grand = Number((grand + v).toFixed(2));
-                                    return <td key={d.getTime()} style={{ color: v > 0 ? 'var(--text)' : 'var(--text3)' }}>{v ? '$' + v.toFixed(2) : '-'}</td>;
-                                  })}
-                                  <td style={{ color: 'var(--accent-text)', fontWeight: 700 }}>${rT.toFixed(2)}</td>
-                                </tr>
+                                <React.Fragment key={g.id}>
+                                  <tr>
+                                    <td>{g.name}</td>
+                                    {dates.map((d, i) => {
+                                      const v = parseFloat(w.data?.[g.id]?.[fmtDateKey(d)] as any) || 0;
+                                      rT = Number((rT + v).toFixed(2)); colT[i] = Number((colT[i] + v).toFixed(2)); grand = Number((grand + v).toFixed(2));
+                                      return <td key={d.getTime()} style={{ color: v > 0 ? 'var(--text)' : 'var(--text3)' }}>{v ? '$' + v.toFixed(2) : '-'}</td>;
+                                    })}
+                                    <td style={{ color: 'var(--accent-text)', fontWeight: 700 }}>${rT.toFixed(2)}</td>
+                                  </tr>
+                                  {g.miles && (
+                                    <>
+                                      <tr className="mileage-row">
+                                        <td style={{ paddingLeft: '20px', fontStyle: 'italic', color: 'var(--text3)' }}>Miles</td>
+                                        {dates.map((d) => { const v = parseFloat(w.miles?.[g.id]?.[fmtDateKey(d)] as any) || 0; rM = Number((rM + v).toFixed(1)); return <td key={d.getTime()} style={{ color: v > 0 ? 'var(--text3)' : 'transparent', fontSize: '11px' }}>{v ? v.toFixed(1) : '0'}</td>; })}
+                                        <td style={{ color: 'var(--text3)', fontSize: '11px' }}>{rM.toFixed(1)}</td>
+                                      </tr>
+                                      <tr className="mileage-row">
+                                        <td style={{ paddingLeft: '20px', fontStyle: 'italic', color: 'var(--text3)', opacity: 0.7 }}>$/mi</td>
+                                        {dates.map((d) => { const e = parseFloat(w.data?.[g.id]?.[fmtDateKey(d)] as any) || 0; const m = parseFloat(w.miles?.[g.id]?.[fmtDateKey(d)] as any) || 0; return <td key={d.getTime()} style={{ color: 'var(--text3)', opacity: 0.7, fontSize: '10px' }}>{m > 0 ? (e / m).toFixed(2) : '-'}</td>; })}
+                                        <td style={{ color: 'var(--text3)', fontSize: '10px', fontWeight: 600 }}>{rM > 0 ? (rT / rM).toFixed(2) : '-'}</td>
+                                      </tr>
+                                    </>
+                                  )}
+                                </React.Fragment>
                               );
                             })}
                             <tr style={{ background: 'var(--table-total-bg)' }}><td>Total</td>{colT.map((v, i) => <td key={i} style={{ fontWeight: 700 }}>{v ? '$' + v.toFixed(2) : '-'}</td>)}<td style={{ fontWeight: 700 }}>${grand.toFixed(2)}</td></tr>
@@ -552,9 +666,7 @@ syncToSheets(syncEntries);
           <div className="section-label-plain has-help" {...longPress('Appearance', 'Switch between Light, Dark, or System themes.')}>Display <HelpIcon /></div>
           <div className="settings-row">
             <div><div className="settings-label">Theme</div><div className="settings-sub">App brightness</div></div>
-            <div className="seg">
-              {['light', 'auto', 'dark'].map(t => <button key={t} className={theme === t ? 'active' : ''} onClick={() => setThemeState(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>)}
-            </div>
+            <div className="seg">{['light', 'auto', 'dark'].map(t => <button key={t} className={theme === t ? 'active' : ''} onClick={() => setThemeState(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>)}</div>
           </div>
           <div className="section-label-plain has-help" {...longPress('Data Management', 'Backup your data to a file or restore it from a previous backup.')}>Backup <HelpIcon /></div>
           <button className="settings-action-btn" onClick={backupToFile}><i className="ti ti-download"></i><div><div className="settings-label">Save to device</div><div className="settings-sub">Download JSON file</div></div></button>
@@ -574,7 +686,7 @@ syncToSheets(syncEntries);
               <div className="section-label-plain">{sec.title}</div>
               <div className="help-card">
                 <div className="help-card-title"><i className={`ti ${sec.icon}`}></i>{sec.title}</div>
-                <div className="help-card-body">{sec.isStart ? sec.steps.map((s, i) => <div className="help-start-step" key={i}><div className="help-step-num">{i + 1}</div><span>{s}</span></div>) : sec.body.map((p, i) => <p key={i}>{p}</p>)}</div>
+                <div className="help-card-body">{sec.isStart ? sec.steps.map((s: string, i: number) => <div className="help-start-step" key={i}><div className="help-step-num">{i + 1}</div><span>{s}</span></div>) : sec.body.map((p: string, i: number) => <p key={i}>{p}</p>)}</div>
               </div>
             </div>
           ))}
@@ -586,12 +698,16 @@ syncToSheets(syncEntries);
           <h3>{editingId ? 'Edit gig' : 'Add gig'}</h3>
           <div className="field"><label className="has-help" {...longPress('Gig Name', 'The name of the platform or source of income.')}>Name <HelpIcon /></label><input type="text" value={fName} onChange={e => setFName(e.target.value)} /></div>
           <div className="row2">
-            <div className="field"><label className="has-help" {...longPress('Calculation Style', "Choose 'Replace' to overwrite the day\'s total with your new input, or 'Additive' to add your new input to the existing total.")}>Behavior <HelpIcon /></label><select value={fBehavior} onChange={e => setFBehavior(e.target.value)}><option value="replace">Replace</option><option value="add">Additive</option></select></div>
+            <div className="field"><label className="has-help" {...longPress('Calculation Style', "Choose 'Replace' to overwrite the day's total with your new input, or 'Additive' to add your new input to the existing total.")}>Behavior <HelpIcon /></label><select value={fBehavior} onChange={e => setFBehavior(e.target.value)}><option value="replace">Replace</option><option value="add">Additive</option></select></div>
             <div className="field"><label className="has-help" {...longPress('Week Start', 'Select the day your pay cycle begins for this specific platform.')}>Starts <HelpIcon /></label><select value={fWeekStart} onChange={e => setFWeekStart(e.target.value)}>{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => <option key={d} value={d}>{d}</option>)}</select></div>
           </div>
           <div className="field"><label className="has-help" {...longPress('Cutoff Time', 'The time of day when earnings transition from the previous date to the next date.')}>Cutoff <HelpIcon /></label><input type="time" value={fCutoff} onChange={e => setFCutoff(e.target.value)} /></div>
+          <div className="field" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
+            <input type="checkbox" id="track-miles" checked={fMiles} onChange={e => setFMiles(e.target.checked)} style={{ width: 'auto' }} />
+            <label htmlFor="track-miles" style={{ margin: 0, fontSize: '14px', color: 'var(--text)' }}>Track mileage for this gig</label>
+          </div>
           <div className="modal-actions"><button onClick={() => setModalOpen(false)}>Cancel</button><button onClick={() => {
-            const data = { name: fName, behavior: fBehavior, weekStart: fWeekStart, cutoff: fCutoff };
+            const data = { name: fName, behavior: fBehavior, weekStart: fWeekStart, cutoff: fCutoff, miles: fMiles };
             if (editingId) setGigs(prev => prev.map(x => x.id === editingId ? { ...x, ...data } : x)); else setGigs(prev => [...prev, { id: Date.now(), ...data }]);
             setModalOpen(false);
           }}>Save</button></div>
@@ -602,27 +718,25 @@ syncToSheets(syncEntries);
         <div className="confirm-box"><p>{confirmMsg}</p><div className="modal-actions">
           {confirmBtnText !== 'OK' && <button onClick={() => setConfirmOpen(false)}>Cancel</button>}
           <button style={{ background: 'var(--danger-bg)', color: 'var(--danger-text)' }} onClick={() => {
-          if (pendingRestoreData) {
-            if (pendingRestoreData.gigs) setGigs(pendingRestoreData.gigs);
-            if (pendingRestoreData.weekHistory) setWeekHistory(pendingRestoreData.weekHistory);
-            showNotification('Data restored successfully!', 'success');
-            setPendingRestoreData(null);
-          } else if (pendingDeleteWeekKey) {
-            setWeekHistory(prev => prev.filter(w => w.key !== pendingDeleteWeekKey));
-          } else if (deletingId) {
-            setGigs(prev => prev.filter(x => x.id !== deletingId));
-          }
-          setConfirmOpen(false); setDeletingId(null); setPendingDeleteWeekKey(null);
-        }}>{confirmBtnText}</button></div></div>
+            if (pendingRestoreData) {
+              if (pendingRestoreData.gigs) setGigs(pendingRestoreData.gigs);
+              if (pendingRestoreData.weekHistory) setWeekHistory(pendingRestoreData.weekHistory);
+              showNotification('Data restored successfully!', 'success');
+              setPendingRestoreData(null);
+            } else if (pendingDeleteWeekKey) {
+              setWeekHistory(prev => prev.filter(w => w.key !== pendingDeleteWeekKey));
+            } else if (deletingId) {
+              setGigs(prev => prev.filter(x => x.id !== deletingId));
+            }
+            setConfirmOpen(false); setDeletingId(null); setPendingDeleteWeekKey(null);
+          }}>{confirmBtnText}</button></div></div>
       </div>
 
       <div className={`modal-bg ${helpModal ? 'open' : ''}`}>
         <div className="modal help-modal">
           <h3>{helpModal?.title}</h3>
           <p style={{ fontSize: '14px', lineHeight: '1.5', margin: '12px 0 20px', color: 'var(--text2)' }}>{helpModal?.body}</p>
-          <div className="modal-actions">
-            <button className="primary-btn" onClick={() => setHelpModal(null)}>Got it</button>
-          </div>
+          <div className="modal-actions"><button className="primary-btn" onClick={() => setHelpModal(null)}>Got it</button></div>
         </div>
       </div>
 
@@ -658,9 +772,10 @@ const HELP_SECTIONS = [
   {
     id: 'daily', icon: 'ti-home', title: 'Daily input', body: [
       'This is the main screen you will use every day. Each gig appears with its name, today\'s running total beneath it, and a box on the right where you type in your new earnings.',
-      'Tap Update when you are done. Today\'s total for each gig updates instantly beneath its name.',
+      'If Track mileage is enabled for a gig, you will see a Start Trip button. Tap it to begin tracking your trip via GPS. Tap it again to finish and add the distance to your daily total.',
+      'You can also manually enter or correct mileage in the Miles field.',
+      'Tap Update when you are done entering earnings. Today\'s total updates instantly and your earnings are also sent to your Google Sheet.',
       'For gigs set to add: each Update adds your new number on top of what was already entered today. For gigs set to replace: the new number overwrites today\'s previous amount.',
-      'The Current cycle totals table below shows each gig\'s running total for its own pay cycle. Gigs whose pay cycle does not include today are shown with a note so you always know where each number comes from.',
       'If you accidentally add a wrong amount on an additive gig, type a negative number to correct it — for example, -20 subtracts $20.'
     ]
   },
@@ -668,22 +783,31 @@ const HELP_SECTIONS = [
     id: 'gigs', icon: 'ti-settings', title: 'Gig config', body: [
       'This is where you manage the gig platforms you work for. Tap Add gig to create a new one, or the pencil icon to edit an existing one.',
       'Each gig has four settings: the name of the platform, whether earnings add on top or replace the previous amount, which day the pay week starts, and what time the platform starts counting a new day.',
+      'You can also enable Track mileage for any gig. When enabled, a Start Trip button will appear on the daily screen.',
       'Tap the red trash icon to remove a gig. You will be asked to confirm before anything is deleted.'
     ]
   },
   {
     id: 'report', icon: 'ti-table', title: 'Weekly report', body: [
-      'The weekly report groups your gigs by pay schedule. Each group shows its exact work period and the Wednesday pay date — the day you actually get paid.',
-      'All groups share the same pay Wednesday. Mon–Sun gigs show Monday through Sunday. Wed–Tue gigs like Roadie show Wednesday through the following Tuesday — all seven days including Monday and Tuesday at the end.',
-      'Gigs that share the same schedule appear in one table. Gigs with a different schedule get their own table.',
-      'Use the arrows at the top to browse past weeks. Tap Export to download the week as a spreadsheet file, or Delete to remove a saved week. Note: Exporting and Deleting are only available once all work days in the cycle have ended to ensure final totals are accurate. If the report hasn\'t been exported yet, the app will warn you before permanent deletion.'
+      'The weekly report groups your gigs by pay schedule. Each group shows its exact work period and the Wednesday pay date.',
+      'If mileage tracking is enabled for a gig, a Miles row will appear under its earnings.',
+      'Use the arrows at the top to browse past weeks. Tap Export to download the week as a spreadsheet file, or Delete to remove a saved week.',
+      'Exporting and Deleting are only available once all work days in the cycle have ended.'
     ]
   },
   {
     id: 'settings', icon: 'ti-adjustments-horizontal', title: 'App settings', body: [
-      'Use the Theme buttons to switch between Light mode, Dark mode, or Auto. Auto will match whatever your phone is currently set to. Dark mode is recommended when driving at night.',
-      'Under Data backup, you can save a backup file to your device or email it to yourself. The backup includes your gig setup, all weekly history, and your preferences. To restore from a backup, tap Restore from backup and choose your saved file.',
+      'Use the Theme buttons to switch between Light mode, Dark mode, or Auto.',
+      'Under Data backup, you can save a backup file to your device or email it to yourself. To restore from a backup, tap Restore and choose your saved file.',
       'Under Support the app, you can leave an optional tip via Venmo. It is completely voluntary — thank you for being a beta tester!'
+    ]
+  },
+  {
+    id: 'gps-tips', icon: 'ti-location', title: 'GPS Tracking Tips', body: [
+      'GPS tracking is only available when the Daily Input screen is set to today\'s date.',
+      'For best results, keep the app in the foreground while tracking. Mobile browsers often stop GPS when you switch apps or lock your screen.',
+      'This app attempts to keep your screen on while a trip is active (supported browsers only).',
+      'If you notice missing distance, you can always manually correct the total in the Miles field.'
     ]
   }
 ];
