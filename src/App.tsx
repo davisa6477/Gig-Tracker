@@ -255,9 +255,11 @@ export default function App() {
 const syncToSheets = (entries: { gig: string; date: string; amount: number; miles: number; tabName: string }[]) => {
   const url = import.meta.env.VITE_SHEETS_URL;
   if (!url || entries.length === 0) return;
-  const payload = encodeURIComponent(JSON.stringify({ entries }));
-  fetch(`${url}?data=${payload}`, {
-    method: 'GET',
+  fetch(url, {
+    method: 'POST',
+    body: JSON.stringify({ entries }),
+    headers: { 'Content-Type': 'text/plain' },
+    redirect: 'follow'
   }).catch(() => {});
 };
 
@@ -333,18 +335,28 @@ const syncToSheets = (entries: { gig: string; date: string; amount: number; mile
         });
 
         // Build sync entries from freshly updated hist
-        const cycleEnd = addDays(refMon, 6);
-        const tabName = (cycleEnd.getMonth() + 1).toString().padStart(2, '0') + '/' +
-          cycleEnd.getDate().toString().padStart(2, '0') + '/' +
-          cycleEnd.getFullYear().toString().slice(2);
 	const parts = effKey.split('-');
 	const dateStr = parseInt(parts[1]) + '/' + parseInt(parts[2]) + '/' + parts[0];
 
-        entriesToSync = gigs.map(g => {
-          const amount = hist.find(w => w.key === weekKey)?.data?.[g.id]?.[effKey] || 0;
-          const miles = hist.find(w => w.key === weekKey)?.miles?.[g.id]?.[effKey] || 0;
-          return { gig: g.name, date: dateStr, amount, miles, tabName };
-        }).filter(e => e.amount > 0);
+	entriesToSync = gigs.map(g => {
+	  const amount = hist.find(w => w.key === weekKey)?.data?.[g.id]?.[effKey] || 0;
+	  const miles = hist.find(w => w.key === weekKey)?.miles?.[g.id]?.[effKey] || 0;
+	
+	  // Find which Monday starts the calendar week for this gig's cycle
+	  const gigDow = jsToOur(selectedDate.getDay()); // 0=Mon, 6=Sun
+	  const gigStartDow = DAY_IDX[g.weekStart];
+	  const gigDaysBack = (gigDow - gigStartDow + 7) % 7;
+	  const gigCycleStart = addDays(selectedDate, -gigDaysBack);
+	  // The tab is named after the Sunday of the Mon-Sun week that contains the cycle start
+	  const cycleStartDow = jsToOur(gigCycleStart.getDay());
+	  const tabMonday = addDays(gigCycleStart, -cycleStartDow);
+	  const tabSunday = addDays(tabMonday, 6);
+	  const tabName = (tabSunday.getMonth() + 1).toString().padStart(2, '0') + '/' +
+	    tabSunday.getDate().toString().padStart(2, '0') + '/' +
+	    tabSunday.getFullYear().toString().slice(2);
+
+	  return { gig: g.name, date: dateStr, amount, miles, tabName };
+	}).filter(e => e.amount > 0);
 
         return hist;
       });
