@@ -162,6 +162,15 @@ onTouchEnd: () => {
   };
 
   // Actions
+  const syncToSheets = (entries: { gig: string; date: string; amount: number; tabName: string }[]) => {
+  const url = import.meta.env.VITE_SHEETS_URL;
+  if (!url) return;
+  fetch(url, {
+    method: 'POST',
+    body: JSON.stringify({ entries }),
+    headers: { 'Content-Type': 'text/plain' }
+  }).catch(() => {});
+};
   const updateTotals = () => {
     if (isLongPressActive.current) return;
     if (updateTimer.current) clearTimeout(updateTimer.current);
@@ -222,7 +231,24 @@ onTouchEnd: () => {
         });
         return hist;
       });
-      setUpdateState('saved'); updateTimer.current = setTimeout(() => setUpdateState('idle'), 2000);
+      setUpdateState('saved'); updateTimer.current = setTimeout(() => setUpdateState('idle'), 2000); 
+      const syncEntries: { gig: string; date: string; amount: number; tabName: string }[] = [];
+gigs.forEach(g => {
+  const d = dateOnly(inputDateKey);
+  const refMon = addDays(d, -jsToOur(d.getDay()));
+  const cycleEnd = addDays(refMon, 6);
+  const tabName = (cycleEnd.getMonth() + 1).toString().padStart(2, '0') + '/' +
+    cycleEnd.getDate().toString().padStart(2, '0') + '/' +
+    cycleEnd.getFullYear().toString().slice(2);
+  const amount = hist.find((w: any) => w.key === fmtDateKey(refMon))?.data?.[g.id]?.[inputDateKey] || 0;
+  if (amount > 0) syncEntries.push({
+    gig: g.name,
+    date: (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear(),
+    amount,
+    tabName
+  });
+});
+syncToSheets(syncEntries);
     }, 400);
   };
 
