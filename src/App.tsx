@@ -12,7 +12,13 @@ function jsToOur(d: number) { return (d + 6) % 7; }
 
 const fmtDateKey = (d: Date) => d.getFullYear() + '-' + (d.getMonth() + 1).toString().padStart(2, '0') + '-' + d.getDate().toString().padStart(2, '0');
 const fmtShort = (d: Date) => MONTHS[d.getMonth()] + ' ' + d.getDate();
-const dateOnly = (d: Date | string) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+const dateOnly = (d: Date | string) => {
+  if (typeof d === 'string') {
+    const parts = d.split('-');
+    return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+  }
+  const x = new Date(d); x.setHours(0, 0, 0, 0); return x;
+};
 const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 const getPayWed = (refMonday: Date) => addDays(refMonday, 9);
 const getCycleDates = (ws: string, payWed: Date) => {
