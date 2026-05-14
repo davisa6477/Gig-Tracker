@@ -59,8 +59,7 @@ export default function App() {
   const [offendingInputIds, setOffendingInputIds] = useState<number[]>([]);
   const [helpModal, setHelpModal] = useState<{ title: string; body: string } | null>(null);
 
-  const updateStateState = useState<'idle' | 'saving' | 'saved'>('idle');
-  const [updateState, setUpdateState] = updateStateState;
+  const [updateState, setUpdateState] = useState<'idle' | 'saving' | 'saved'>('idle');
   const updateTimer = useRef<any>(null);
   const helpTimer = useRef<any>(null);
   const isLongPressActive = useRef(false);
@@ -200,8 +199,7 @@ export default function App() {
     document.documentElement.classList.toggle('dark', theme === 'dark' || (theme === 'auto' && prefersDark));
   };
 
-  const getSelectLabel = (d: Date) => DAY_FULL[jsToOur(d.getDay())] + ', ' + MONTHS[d.getMonth()] + ' ' + d.getDate();
-
+  const getValueForDate = (id: number, dateKey: string) => {
     const gig = gigs.find(g => g.id === id); if (!gig) return 0;
     const d = dateOnly(dateKey);
     const refMon = addDays(d, -jsToOur(d.getDay()));
@@ -270,21 +268,20 @@ export default function App() {
   };
 
   // --- Google Sheets sync ---
-const syncToSheets = (entries: { gig: string; date: string; amount: number; miles: number; tabName: string }[]) => {
-  const url = (sheetSyncUrl || import.meta.env.VITE_SHEETS_URL || '').trim();
-  if (!sheetSyncEnabled || !url || entries.length === 0) return;
-  const payloadBody: any = { entries };
-  if (sheetSyncSecret.trim()) payloadBody.token = sheetSyncSecret.trim();
-  const payload = JSON.stringify(payloadBody);
-  fetch(url, {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json'
-  },
-  body: payload
-})
-.catch(() => {});
-}; 
+  const syncToSheets = (entries: { gig: string; date: string; amount: number; miles: number; tabName: string }[]) => {
+    const url = (sheetSyncUrl || import.meta.env.VITE_SHEETS_URL || '').trim();
+    if (!sheetSyncEnabled || !url || entries.length === 0) return;
+    const payloadBody: any = { entries };
+    if (sheetSyncSecret.trim()) payloadBody.token = sheetSyncSecret.trim();
+    const payload = JSON.stringify(payloadBody);
+    fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: payload
+    }).catch(() => {});
+  };
 
   // Actions
   const updateTotals = () => {
@@ -335,76 +332,74 @@ const syncToSheets = (entries: { gig: string; date: string; amount: number; mile
 
     setOffendingInputIds([]);
     setUpdateState('saving');
-    setTimeout(() => {
-      let entriesToSync: { gig: string; date: string; amount: number; tabName: string }[] = [];
 
-      setWeekHistory(prev => {
-        const hist = [...prev];
-        const selectedDate = dateOnly(inputDateKey);
-        const effKey = inputDateKey;
-        const refMon = addDays(selectedDate, -jsToOur(selectedDate.getDay()));
-        const weekKey = fmtDateKey(refMon);
+    let entriesToSync: { gig: string; date: string; amount: number; miles: number; tabName: string }[] = [];
+    setWeekHistory(prev => {
+      const hist = [...prev];
+      const selectedDate = dateOnly(inputDateKey);
+      const effKey = inputDateKey;
+      const refMon = addDays(selectedDate, -jsToOur(selectedDate.getDay()));
+      const weekKey = fmtDateKey(refMon);
 
-        gigs.forEach(g => {
-          let idx = hist.findIndex(w => w.key === weekKey);
-          if (idx === -1) {
-            hist.push({ key: weekKey, startDate: refMon.toISOString(), data: {}, miles: {}, exported: false });
-            idx = hist.length - 1;
-          }
-          const entry = { ...hist[idx], data: { ...hist[idx].data }, miles: { ...hist[idx].miles } };
+      gigs.forEach(g => {
+        let idx = hist.findIndex(w => w.key === weekKey);
+        if (idx === -1) {
+          hist.push({ key: weekKey, startDate: refMon.toISOString(), data: {}, miles: {}, exported: false });
+          idx = hist.length - 1;
+        }
+        const entry = { ...hist[idx], data: { ...hist[idx].data }, miles: { ...hist[idx].miles } };
 
-          const inp = document.getElementById(`inp-${g.id}`) as HTMLInputElement;
-          const miInp = document.getElementById(`mi-${g.id}`) as HTMLInputElement;
-          const val = parseFloat(inp?.value || '') || 0;
-          const mVal = parseFloat(miInp?.value || '') || 0;
+        const inp = document.getElementById(`inp-${g.id}`) as HTMLInputElement;
+        const miInp = document.getElementById(`mi-${g.id}`) as HTMLInputElement;
+        const val = parseFloat(inp?.value || '') || 0;
+        const mVal = parseFloat(miInp?.value || '') || 0;
 
-          if (val !== 0 || (inp && inp.value !== '')) {
-            if (!entry.data[g.id]) entry.data[g.id] = {};
-            const ex = parseFloat(entry.data[g.id][effKey]) || 0;
-            entry.data[g.id][effKey] = g.behavior === 'add' ? Number((ex + val).toFixed(2)) : Number(val.toFixed(2));
-            if (inp) inp.value = '';
-          }
+        if (val !== 0 || (inp && inp.value !== '')) {
+          if (!entry.data[g.id]) entry.data[g.id] = {};
+          const ex = parseFloat(entry.data[g.id][effKey]) || 0;
+          entry.data[g.id][effKey] = g.behavior === 'add' ? Number((ex + val).toFixed(2)) : Number(val.toFixed(2));
+          if (inp) inp.value = '';
+        }
 
-          if (mVal !== 0 || (miInp && miInp.value !== '')) {
-            if (!entry.miles[g.id]) entry.miles[g.id] = {};
-            const exM = parseFloat(entry.miles[g.id][effKey]) || 0;
-            entry.miles[g.id][effKey] = Number((exM + mVal).toFixed(1));
-            if (miInp) miInp.value = '';
-          }
+        if (mVal !== 0 || (miInp && miInp.value !== '')) {
+          if (!entry.miles[g.id]) entry.miles[g.id] = {};
+          const exM = parseFloat(entry.miles[g.id][effKey]) || 0;
+          entry.miles[g.id][effKey] = Number((exM + mVal).toFixed(1));
+          if (miInp) miInp.value = '';
+        }
 
-          hist[idx] = entry;
-        });
-
-        // Build sync entries from freshly updated hist
-	const parts = effKey.split('-');
-	const dateStr = parseInt(parts[1]) + '/' + parseInt(parts[2]) + '/' + parts[0];
-
-	entriesToSync = gigs.map(g => {
-	  const amount = hist.find(w => w.key === weekKey)?.data?.[g.id]?.[effKey] || 0;
-	  const miles = hist.find(w => w.key === weekKey)?.miles?.[g.id]?.[effKey] || 0;
-
-	  const sd = dateOnly(effKey);
-	  const gigDow = jsToOur(sd.getDay());
-	  const gigStartDow = DAY_IDX[g.weekStart];
-	  const gigDaysBack = (gigDow - gigStartDow + 7) % 7;
-	  const gigCycleStart = addDays(sd, -gigDaysBack);
-	  const cycleStartDow = jsToOur(gigCycleStart.getDay());
-	  const tabMonday = addDays(gigCycleStart, -cycleStartDow);
-	  const tabSunday = addDays(tabMonday, 6);
-	  const tabName = (tabSunday.getMonth() + 1).toString().padStart(2, '0') + '/' +
-	    tabSunday.getDate().toString().padStart(2, '0') + '/' +
-	    tabSunday.getFullYear().toString().slice(2);
-
-	  return { gig: g.name, date: dateStr, amount, miles, tabName };
-	}).filter(e => e.amount !== 0 || e.miles > 0);
-
-        return hist;
+        hist[idx] = entry;
       });
 
-      setUpdateState('saved');
-      updateTimer.current = setTimeout(() => setUpdateState('idle'), 2000);
-      setTimeout(() => syncToSheets(entriesToSync), 150);
-    }, 100);
+      const parts = effKey.split('-');
+      const dateStr = parseInt(parts[1]) + '/' + parseInt(parts[2]) + '/' + parts[0];
+      const weekEntry = hist.find(w => w.key === weekKey);
+
+      entriesToSync = gigs.map(g => {
+        const amount = weekEntry?.data?.[g.id]?.[effKey] || 0;
+        const miles = weekEntry?.miles?.[g.id]?.[effKey] || 0;
+
+        const sd = dateOnly(effKey);
+        const gigDow = jsToOur(sd.getDay());
+        const gigStartDow = DAY_IDX[g.weekStart];
+        const gigDaysBack = (gigDow - gigStartDow + 7) % 7;
+        const gigCycleStart = addDays(sd, -gigDaysBack);
+        const cycleStartDow = jsToOur(gigCycleStart.getDay());
+        const tabMonday = addDays(gigCycleStart, -cycleStartDow);
+        const tabSunday = addDays(tabMonday, 6);
+        const tabName = (tabSunday.getMonth() + 1).toString().padStart(2, '0') + '/' +
+          tabSunday.getDate().toString().padStart(2, '0') + '/' +
+          tabSunday.getFullYear().toString().slice(2);
+
+        return { gig: g.name, date: dateStr, amount, miles, tabName };
+      }).filter(e => e.amount !== 0 || e.miles > 0);
+
+      return hist;
+    });
+
+    setUpdateState('saved');
+    updateTimer.current = setTimeout(() => setUpdateState('idle'), 2000);
+    syncToSheets(entriesToSync);
   };
 
   const showNotification = (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -420,7 +415,6 @@ const syncToSheets = (entries: { gig: string; date: string; amount: number; mile
     const activeCycles = uniqueWeekStarts.filter(ws => { const { cycleEnd } = getCycleDates(ws as string, payWed); return today <= cycleEnd; });
     if (activeCycles.length > 0) { setHelpModal({ title: 'Export Restricted', body: 'Exporting is disabled until the current pay cycle is complete.' }); return; }
 
-    const win = window as any;
     const XL = XLSX;
     const rows: any[][] = []; const groups: any = {};
     gigs.forEach(g => { if (!groups[g.weekStart]) groups[g.weekStart] = []; groups[g.weekStart].push(g); });
