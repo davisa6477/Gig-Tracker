@@ -274,13 +274,11 @@ export default function App() {
     const payloadBody: any = { entries };
     if (sheetSyncSecret.trim()) payloadBody.token = sheetSyncSecret.trim();
     const payload = JSON.stringify(payloadBody);
-    fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: payload
-    }).catch(() => {});
+  fetch(url, {
+  method: 'POST',
+  mode: 'no-cors',
+  body: payload
+}).catch(() => {});
   };
 
   // Actions
