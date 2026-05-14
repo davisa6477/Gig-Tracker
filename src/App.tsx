@@ -279,7 +279,7 @@ const syncToSheets = (entries: { gig: string; date: string; amount: number; mile
   body: payload
 })
 .catch(() => {});
-};
+}; 
 
   // Actions
   const updateTotals = () => {
