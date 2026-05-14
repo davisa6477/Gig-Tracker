@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { CircleHelp } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 const VENMO_USERNAME = 'Aaron-Davis-6477';
 const VENMO_DEEP = `venmo://paycharge?txn=pay&recipients=${VENMO_USERNAME}&amount=0&note=Gig+Tracker+Beta+Tip`;
@@ -36,6 +37,8 @@ export default function App() {
   const [gigs, setGigs] = useState<any[]>(() => JSON.parse(localStorage.getItem('gigs') || 'null') || []);
   const [weekHistory, setWeekHistory] = useState<any[]>(() => JSON.parse(localStorage.getItem('weekHistory') || '[]'));
   const [sheetSyncUrl, setSheetSyncUrl] = useState(() => localStorage.getItem('sheetSyncUrl') || '');
+  const [sheetSyncEnabled, setSheetSyncEnabled] = useState(() => localStorage.getItem('sheetSyncEnabled') === 'true');
+  const [sheetSyncSecret, setSheetSyncSecret] = useState(() => localStorage.getItem('sheetSyncSecret') || '');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [reportWeekIndex, setReportWeekIndex] = useState(0);
 
@@ -150,7 +153,15 @@ export default function App() {
 
   useEffect(() => {
     const lockOrientation = async () => {
-      try { if ('orientation' in screen && (screen.orientation as any).lock) await (screen.orientation as any).lock('portrait'); } catch (e) {}
+      try { 
+        if ('orientation' in screen && (screen.orientation as any).lock) {
+          await (screen.orientation as any).lock('portrait').catch((err: any) => {
+            console.warn('Screen orientation lock not supported:', err);
+          });
+        }
+      } catch (err) {
+        console.warn('Screen orientation lock error:', err);
+      }
     };
     lockOrientation();
     return () => { if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current); };
@@ -189,14 +200,8 @@ export default function App() {
     document.documentElement.classList.toggle('dark', theme === 'dark' || (theme === 'auto' && prefersDark));
   };
 
-  const getEffectiveDate = (date: Date, cutoff: string) => {
-    const d = new Date(date);
-    const [h, m] = cutoff.split(':').map(Number);
-    if (d.getHours() < h || (d.getHours() === h && d.getMinutes() < m)) d.setDate(d.getDate() - 1);
-    return dateOnly(d);
-  };
+  const getSelectLabel = (d: Date) => DAY_FULL[jsToOur(d.getDay())] + ', ' + MONTHS[d.getMonth()] + ' ' + d.getDate();
 
-  const getValueForDate = (id: number, dateKey: string) => {
     const gig = gigs.find(g => g.id === id); if (!gig) return 0;
     const d = dateOnly(dateKey);
     const refMon = addDays(d, -jsToOur(d.getDay()));
@@ -257,11 +262,11 @@ export default function App() {
   const handleMilesInput = (e: React.FormEvent<HTMLInputElement>) => {
     const input = e.currentTarget;
     let value = input.value.replace(/[^0-9.-]/g, '');
-    value = value.replace(/^-*/, value.startsWith('-') ? '-' : ''); // allow at most one - at start
-    value = value.replace(/-+/g, ''); // remove any - not at start
+    const isNegative = value.startsWith('-');
+    value = value.replace(/-/g, '');
     const parts = value.split('.');
     if (parts.length > 2) value = parts[0] + '.' + parts.slice(1).join('');
-    input.value = value;
+    input.value = (isNegative ? '-' : '') + value;
   };
 
   // --- Google Sheets sync ---
@@ -398,8 +403,8 @@ const syncToSheets = (entries: { gig: string; date: string; amount: number; mile
 
       setUpdateState('saved');
       updateTimer.current = setTimeout(() => setUpdateState('idle'), 2000);
-      setTimeout(() => syncToSheets(entriesToSync), 100);
-    }, 400);
+      setTimeout(() => syncToSheets(entriesToSync), 150);
+    }, 100);
   };
 
   const showNotification = (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -415,8 +420,9 @@ const syncToSheets = (entries: { gig: string; date: string; amount: number; mile
     const activeCycles = uniqueWeekStarts.filter(ws => { const { cycleEnd } = getCycleDates(ws as string, payWed); return today <= cycleEnd; });
     if (activeCycles.length > 0) { setHelpModal({ title: 'Export Restricted', body: 'Exporting is disabled until the current pay cycle is complete.' }); return; }
 
-    const win = window as any; if (!win.XLSX) { showNotification('XLSX not loaded', 'error'); return; }
-    const XL = win.XLSX; const rows: any[][] = []; const groups: any = {};
+    const win = window as any;
+    const XL = XLSX;
+    const rows: any[][] = []; const groups: any = {};
     gigs.forEach(g => { if (!groups[g.weekStart]) groups[g.weekStart] = []; groups[g.weekStart].push(g); });
     const payL = `Paid Wed ${fmtShort(payWed)}`;
     Object.keys(groups).forEach((ws, i) => {
