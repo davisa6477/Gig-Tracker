@@ -35,6 +35,7 @@ export default function App() {
   const [currentScreen, setCurrentScreen] = useState('daily');
   const [gigs, setGigs] = useState<any[]>(() => JSON.parse(localStorage.getItem('gigs') || 'null') || []);
   const [weekHistory, setWeekHistory] = useState<any[]>(() => JSON.parse(localStorage.getItem('weekHistory') || '[]'));
+  const [sheetSyncUrl, setSheetSyncUrl] = useState(() => localStorage.getItem('sheetSyncUrl') || '');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [reportWeekIndex, setReportWeekIndex] = useState(0);
 
@@ -179,6 +180,9 @@ export default function App() {
   useEffect(() => { localStorage.setItem('theme', theme); applyTheme(); }, [theme]);
   useEffect(() => { localStorage.setItem('gigs', JSON.stringify(gigs)); }, [gigs]);
   useEffect(() => { localStorage.setItem('weekHistory', JSON.stringify(weekHistory)); }, [weekHistory]);
+  useEffect(() => { localStorage.setItem('sheetSyncUrl', sheetSyncUrl); }, [sheetSyncUrl]);
+  useEffect(() => { localStorage.setItem('sheetSyncEnabled', sheetSyncEnabled.toString()); }, [sheetSyncEnabled]);
+  useEffect(() => { localStorage.setItem('sheetSyncSecret', sheetSyncSecret); }, [sheetSyncSecret]);
 
   const applyTheme = () => {
     const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme:dark)').matches;
@@ -252,16 +256,20 @@ export default function App() {
 
   const handleMilesInput = (e: React.FormEvent<HTMLInputElement>) => {
     const input = e.currentTarget;
-    input.value = input.value.replace(/[^0-9.]/g, '');
+    input.value = input.value.replace(/[^0-9.-]/g, '');
     const parts = input.value.split('.');
     if (parts.length > 2) input.value = parts[0] + '.' + parts.slice(1).join('');
+    if (input.value.includes('-') && !input.value.startsWith('-')) input.value = input.value.replace('-', '');
+    if (input.value.split('-').length > 2) input.value = input.value.replace(/-+$/, '');
   };
 
   // --- Google Sheets sync ---
 const syncToSheets = (entries: { gig: string; date: string; amount: number; miles: number; tabName: string }[]) => {
-  const url = import.meta.env.VITE_SHEETS_URL;
-  if (!url || entries.length === 0) return;
-  const payload = JSON.stringify({ entries });
+  const url = (sheetSyncUrl || import.meta.env.VITE_SHEETS_URL || '').trim();
+  if (!sheetSyncEnabled || !url || entries.length === 0) return;
+  const payloadBody: any = { entries };
+  if (sheetSyncSecret.trim()) payloadBody.token = sheetSyncSecret.trim();
+  const payload = JSON.stringify(payloadBody);
   fetch(url, {
   method: 'POST',
   headers: {
@@ -293,9 +301,27 @@ const syncToSheets = (entries: { gig: string; date: string; amount: number; mile
       if (result < 0) offending.push(g.id);
     });
 
+    let milesOffending: number[] = [];
+    gigs.forEach(g => {
+      const miInp = document.getElementById(`mi-${g.id}`) as HTMLInputElement;
+      const mVal = parseFloat(miInp?.value || '') || 0;
+      if (mVal === 0 && (!miInp || miInp.value === '')) return;
+      const week = weekHistory.find(w => w.key === weekKey);
+      const exM = parseFloat(week?.miles?.[g.id]?.[effKey] as any) || 0;
+      if (exM + mVal < 0) milesOffending.push(g.id);
+    });
+
     if (offending.length > 0) {
       setOffendingInputIds(offending);
       setConfirmMsg("Your balance can't go below zero. Please fix the amounts highlighted in red.");
+      setConfirmBtnText('OK');
+      setConfirmOpen(true);
+      return;
+    }
+
+    if (milesOffending.length > 0) {
+      setOffendingInputIds(milesOffending);
+      setConfirmMsg("Mileage can't go below zero. Please fix the amounts highlighted in red.");
       setConfirmBtnText('OK');
       setConfirmOpen(true);
       return;
@@ -336,7 +362,7 @@ const syncToSheets = (entries: { gig: string; date: string; amount: number; mile
           if (mVal !== 0 || (miInp && miInp.value !== '')) {
             if (!entry.miles[g.id]) entry.miles[g.id] = {};
             const exM = parseFloat(entry.miles[g.id][effKey]) || 0;
-            entry.miles[g.id][effKey] = g.behavior === 'add' ? Number((exM + mVal).toFixed(1)) : Number(mVal.toFixed(1));
+            entry.miles[g.id][effKey] = Number((exM + mVal).toFixed(1));
             if (miInp) miInp.value = '';
           }
 
@@ -542,7 +568,7 @@ const syncToSheets = (entries: { gig: string; date: string; amount: number; mile
                         {g.miles && (
                           <div className="sub-input">
                             <span className="sub-label">Miles</span>
-                            <input type="text" inputMode="decimal" id={`mi-${g.id}`} placeholder="0.0" onInput={handleMilesInput} autoComplete="off" onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()} />
+                            <input type="text" inputMode="decimal" id={`mi-${g.id}`} placeholder="0.0" onInput={handleMilesInput} className={`input ${offendingInputIds.includes(g.id) ? 'offending' : ''}`} autoComplete="off" onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()} />
                           </div>
                         )}
                         <div className="sub-input">
@@ -688,6 +714,26 @@ const syncToSheets = (entries: { gig: string; date: string; amount: number; mile
             <div><div className="settings-label">Theme</div><div className="settings-sub">App brightness</div></div>
             <div className="seg">{['light', 'auto', 'dark'].map(t => <button key={t} className={theme === t ? 'active' : ''} onClick={() => setThemeState(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>)}</div>
           </div>
+          <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+            <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+              <div>
+                <div className="settings-label">Google Sheets sync</div>
+                <div className="settings-sub">Advanced feature for superusers with their own sheet endpoint.</div>
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px' }}>
+                <input type="checkbox" checked={sheetSyncEnabled} onChange={e => setSheetSyncEnabled(e.target.checked)} />
+                <span>{sheetSyncEnabled ? 'Enabled' : 'Disabled'}</span>
+              </label>
+            </div>
+            <div style={{ width: '100%', marginBottom: '10px' }}>
+              <div style={{ marginBottom: '8px' }}><div className="settings-label">Sync endpoint URL</div><div className="settings-sub">Saved locally in this browser; use only your own Sheets sync endpoint.</div></div>
+              <input type="text" value={sheetSyncUrl} onChange={e => setSheetSyncUrl(e.target.value)} placeholder="https://your-sheet-sync-endpoint" style={{ width: '100%', maxWidth: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }} />
+            </div>
+            <div style={{ width: '100%' }}>
+              <div style={{ marginBottom: '8px' }}><div className="settings-label">Sync secret</div><div className="settings-sub">Optional token for private Apps Script endpoints.</div></div>
+              <input type="text" value={sheetSyncSecret} onChange={e => setSheetSyncSecret(e.target.value)} placeholder="Optional secret token" style={{ width: '100%', maxWidth: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }} />
+            </div>
+          </div>
           <div className="section-label-plain has-help" {...longPress('Data Management', 'Backup your data to a file or restore it from a previous backup.')}>Backup <HelpIcon /></div>
           <button className="settings-action-btn" onClick={backupToFile}><i className="ti ti-download"></i><div><div className="settings-label">Save to device</div><div className="settings-sub">Download JSON file</div></div></button>
           <button className="settings-action-btn" onClick={() => window.location.href = `mailto:?subject=Backup&body=${encodeURIComponent(JSON.stringify({ version: '1.0', gigs, weekHistory }))}`}><i className="ti ti-mail"></i><div><div className="settings-label">Email backup</div><div className="settings-sub">Send to yourself</div></div></button>
@@ -794,8 +840,9 @@ const HELP_SECTIONS = [
       'This is the main screen you will use every day. Each gig appears with its name, today\'s running total beneath it, and a box on the right where you type in your new earnings.',
       'If Track mileage is enabled for a gig, you will see a Start Trip button. Tap it to begin tracking your trip via GPS. Tap it again to finish and add the distance to your daily total.',
       'You can also manually enter or correct mileage in the Miles field.',
-      'Tap Update when you are done entering earnings. Today\'s total updates instantly and your earnings are also sent to your Google Sheet.',
+      'Tap Update when you are done entering earnings. Today\'s total updates instantly, and if Google Sheets sync is enabled, your earnings are also sent to your own Google Sheet.',
       'For gigs set to add: each Update adds your new number on top of what was already entered today. For gigs set to replace: the new number overwrites today\'s previous amount.',
+      'Mileage updates are always additive. You can enter negative values to correct over-counted miles, but the total cannot go below zero.',
       'If you accidentally add a wrong amount on an additive gig, type a negative number to correct it — for example, -20 subtracts $20.'
     ]
   },
@@ -819,6 +866,7 @@ const HELP_SECTIONS = [
     id: 'settings', icon: 'ti-adjustments-horizontal', title: 'App settings', body: [
       'Use the Theme buttons to switch between Light mode, Dark mode, or Auto.',
       'Under Data backup, you can save a backup file to your device or email it to yourself. To restore from a backup, tap Restore and choose your saved file.',
+      'Google Sheets sync is an advanced, opt-in setting for users who want to sync to their own spreadsheet endpoint. Only enable it if you have a private sync URL and tabs named by end-of-cycle date in MM/DD/YY format.',
       'Under Support the app, you can leave an optional tip via Venmo. It is completely voluntary — thank you for being a beta tester!'
     ]
   },
