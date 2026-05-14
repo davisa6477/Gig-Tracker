@@ -278,7 +278,7 @@ export default function App() {
   method: 'POST',
   mode: 'no-cors',
   body: payload
-}).catch(() => {});
+.catch(err => console.error('Sync failed:', err));
   };
 
   // Actions
