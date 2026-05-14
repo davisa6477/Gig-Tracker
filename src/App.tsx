@@ -256,11 +256,12 @@ export default function App() {
 
   const handleMilesInput = (e: React.FormEvent<HTMLInputElement>) => {
     const input = e.currentTarget;
-    input.value = input.value.replace(/[^0-9.-]/g, '');
-    const parts = input.value.split('.');
-    if (parts.length > 2) input.value = parts[0] + '.' + parts.slice(1).join('');
-    if (input.value.includes('-') && !input.value.startsWith('-')) input.value = input.value.replace('-', '');
-    if (input.value.split('-').length > 2) input.value = input.value.replace(/-+$/, '');
+    let value = input.value.replace(/[^0-9.-]/g, '');
+    value = value.replace(/^-*/, value.startsWith('-') ? '-' : ''); // allow at most one - at start
+    value = value.replace(/-+/g, ''); // remove any - not at start
+    const parts = value.split('.');
+    if (parts.length > 2) value = parts[0] + '.' + parts.slice(1).join('');
+    input.value = value;
   };
 
   // --- Google Sheets sync ---
