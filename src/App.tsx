@@ -261,10 +261,15 @@ export default function App() {
 const syncToSheets = (entries: { gig: string; date: string; amount: number; miles: number; tabName: string }[]) => {
   const url = import.meta.env.VITE_SHEETS_URL;
   if (!url || entries.length === 0) return;
-  const payload = encodeURIComponent(JSON.stringify({ entries }));
-  fetch(`${url}?data=${payload}`, {
-    method: 'GET',
-  }).catch(() => {});
+  const payload = JSON.stringify({ entries });
+  fetch(url, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: payload
+})
+.catch(() => {});
 };
 
   // Actions
@@ -359,7 +364,7 @@ const syncToSheets = (entries: { gig: string; date: string; amount: number; mile
 	    tabSunday.getFullYear().toString().slice(2);
 
 	  return { gig: g.name, date: dateStr, amount, miles, tabName };
-	}).filter(e => e.amount > 0);
+	}).filter(e => e.amount !== 0 || e.miles > 0);
 
         return hist;
       });
