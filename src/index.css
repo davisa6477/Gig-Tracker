@@ -244,3 +244,39 @@ tr:last-child td { border-bottom: none; background: var(--table-total-bg); color
 .first-run-btn { display: inline-flex; align-items: center; gap: 8px; padding: 13px 22px; background: var(--accent-bg); color: var(--accent-text); border: 1px solid var(--accent); border-radius: 12px; font-size: 14px; font-weight: 600; cursor: pointer; }
 
 @media (hover: hover) { .update-btn:hover { opacity: 0.8; } .ham-btn:hover, .icon-btn:hover, .drawer-item:hover { background: var(--btn-border); opacity: 0.85; } }
+.landscape-warning {
+  display: none;
+}
+
+@media (orientation: landscape) and (hover: none) and (pointer: coarse) {
+  .landscape-warning {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: var(--background);
+    color: var(--text);
+    text-align: center;
+    padding: 32px;
+    gap: 12px;
+  }
+
+  .landscape-warning i {
+    font-size: 48px;
+    color: var(--accent);
+  }
+
+  .landscape-warning h2 {
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  .landscape-warning p {
+    font-size: 13px;
+    color: var(--text2);
+    line-height: 1.6;
+  }
+}
