@@ -10,8 +10,8 @@ intended for users who want a live copy of their data in Google Sheets.
 
 When you tap Update on the Daily Input screen, Gig Tracker sends the saved
 entries to a Google Apps Script web app endpoint you provide. The script receives
-the data and writes it into the appropriate tab of your spreadsheet — creating
-the row if it doesn't exist, or updating it if it does.
+the data, finds the correct tab and row in your spreadsheet by matching the date,
+and writes the earnings and mileage into the appropriate columns.
 
 Each entry written to the sheet contains:
 - **Date** — the date the earnings were recorded (M/D/YYYY format)
@@ -36,22 +36,25 @@ Each entry written to the sheet contains:
 Open Google Apps Script at https://script.google.com and create a new project.
 Paste the contents of `Code.gs` into the editor and save.
 
-### Step 2 — Set your sync secret
+### Step 2 — Configure Script Properties
 
-The sync secret is a private password that prevents anyone else from writing
-data to your sheet. It is stored securely in Apps Script's Script Properties
-rather than in the code itself.
+Script Properties are the way you provide the script with your secret and your
+sheet's column layout without editing any code. In the Apps Script editor:
 
-In the Apps Script editor:
 1. Click **Project Settings** (the gear icon in the left sidebar)
 2. Scroll down to **Script Properties**
 3. Click **Add script property**
-4. Set the property name to `SYNC_SECRET`
-5. Set the value to any strong password of your choosing
-6. Click **Save script properties**
 
-The script will refuse all requests if this property is not set, so this step
-is required before deploying.
+At minimum you must set the following property:
+
+| Property Name | Value |
+|---------------|-------|
+| `SYNC_SECRET` | A strong password of your choosing |
+
+The script will refuse all requests if `SYNC_SECRET` is not set.
+
+See the **Column Configuration** section below for additional properties you
+may need to set depending on your sheet layout.
 
 ### Step 3 — Deploy as a web app
 
@@ -80,19 +83,85 @@ In Gig Tracker, open **App Settings** and scroll to **Google Sheets Sync**:
 
 ## Sheet Structure
 
-The script writes data into tabs named by the end-of-cycle Sunday date in
-`MM/DD/YY` format (e.g. `05/18/25`). These tab names are calculated
-automatically by Gig Tracker based on each gig's configured week start day,
-and are created by the script if they don't already exist.
+### Tab naming
 
-Within each tab, the script expects (or creates) a header row as the first row:
+The script looks for tabs named by the end-of-cycle Sunday date in `MM/DD/YY`
+format (e.g. `05/18/25`). These tab names are calculated automatically by Gig
+Tracker based on each gig's configured week start day. The tab must already
+exist in your spreadsheet — the script will not create tabs, and will report
+an error if the expected tab is not found.
 
-| Date | Gig | Amount | Miles |
-|------|-----|--------|-------|
+### Row layout
 
-Each subsequent row represents one gig's earnings for one date. If a row
-already exists for a given date and gig combination, it is updated in place.
-If no matching row exists, a new row is appended.
+The script expects each weekly tab to have a fixed grid where each row
+represents one day of the week. It scans a defined range of rows (default:
+rows 10–16) looking for a date cell that matches the entry being synced, then
+writes the earnings and mileage into the columns configured for that gig.
+
+Formula-driven cells such as $/Mile calculations are never touched by the script.
+
+---
+
+## Column Configuration
+
+The script needs to know which column contains the date, earnings, and mileage
+for each gig in your sheet. These are configured via Script Properties so you
+never need to edit the code.
+
+### Default column mappings
+
+The following defaults are built into the script. If your sheet matches these,
+no additional Script Properties are needed:
+
+| Gig | Date Column | Earnings Column | Miles Column |
+|-----|-------------|-----------------|--------------|
+| Instacart | B (2) | C (3) | D (4) |
+| Lyft | B (2) | F (6) | G (7) |
+| Roadie | J (12) | M (13) | O (15) |
+
+### Overriding column mappings
+
+If your sheet uses different columns, add Script Properties to override the
+defaults. Use the column number (A=1, B=2, C=3, etc.):
+
+| Property Name | Description |
+|---------------|-------------|
+| `GIG_DATE_COL_<GigName>` | Column containing dates for this gig |
+| `GIG_EARNINGS_COL_<GigName>` | Column to write earnings into |
+| `GIG_MILES_COL_<GigName>` | Column to write mileage into |
+
+Replace `<GigName>` with the gig name exactly as it appears in Gig Config.
+For example, if your Instacart earnings are in column E instead of C:
+
+| Property Name | Value |
+|---------------|-------|
+| `GIG_EARNINGS_COL_Instacart` | `5` |
+
+You only need to add properties for values that differ from the defaults.
+
+### Adding a new gig
+
+To support a gig that is not in the default list, add all three column
+properties for it. For example, to add a gig called DoorDash:
+
+| Property Name | Value |
+|---------------|-------|
+| `GIG_DATE_COL_DoorDash` | Column number for DoorDash dates |
+| `GIG_EARNINGS_COL_DoorDash` | Column number for DoorDash earnings |
+| `GIG_MILES_COL_DoorDash` | Column number for DoorDash mileage |
+
+The gig name in the property key must match the name configured in the app
+exactly, including capitalization and spacing.
+
+### Overriding the data row range
+
+By default the script scans rows 10 through 16 for date matching. If your
+weekly data starts or ends on different rows, override these:
+
+| Property Name | Default | Description |
+|---------------|---------|-------------|
+| `DATA_START_ROW` | `10` | First row of daily data |
+| `DATA_END_ROW` | `16` | Last row of daily data |
 
 ---
 
@@ -105,19 +174,28 @@ are zero are not synced.
 
 **The sheet reflects your saved totals, not your inputs.**
 The value written to the sheet is the final saved total for that date, not the
-number you typed into the input field. For gigs set to Replace mode, this is
-the new value. For gigs set to Additive mode, this is the running total after
-your entry was added.
+number you typed into the input field. For gigs set to Replace mode this is the
+new value. For gigs set to Additive mode this is the running total after your
+entry was added.
 
-**Sync failures are silent.**
-If a sync request fails (due to network issues, a wrong URL, or an invalid
-secret), the app will not display an error. Your data is always saved locally
-first regardless of whether the sync succeeds.
+**The tab must exist before syncing.**
+This script does not create new tabs. Your weekly tabs must already exist in the
+spreadsheet before syncing. If a tab matching the expected name is not found,
+that entry will be skipped and an error noted in the response.
+
+**Sync failures are silent in the app.**
+If a sync request fails due to network issues, a wrong URL, or an invalid secret,
+the app will not display an error. Your data is always saved locally first
+regardless of whether the sync succeeds. Check Apps Script execution logs if you
+suspect entries are not syncing correctly.
 
 **Gig names must match exactly.**
-The script uses the gig name sent by the app to identify which row to update.
-If you rename a gig in Gig Config after data has already been synced, future
-entries will create new rows under the new name rather than updating the old ones.
+The script uses the gig name sent by the app to look up the column mapping. If
+you rename a gig in Gig Config, update the corresponding Script Property keys to
+match the new name, otherwise the sync will report an unknown gig error.
+
+**Miles are only written if greater than zero.**
+If an entry has no mileage, the miles column in your sheet is left untouched.
 
 ---
 
@@ -126,24 +204,37 @@ entries will create new rows under the new name rather than updating the old one
 **Nothing is appearing in my sheet.**
 - Confirm the sync toggle is set to Enabled in App Settings
 - Check that the endpoint URL is correct and has no extra spaces
-- Confirm the sync secret in the app matches the `SYNC_SECRET` script property exactly
+- Confirm the sync secret in the app matches the `SYNC_SECRET` Script Property
+  exactly, including capitalization
 - Make sure the Apps Script deployment is set to execute as `Me` and access
   is set to `Anyone`
 - Try re-deploying as a new deployment and updating the URL in the app
 
-**I see a "Sync secret not configured" error in Apps Script logs.**
-The `SYNC_SECRET` script property has not been set. Follow Step 2 above.
+**"Sync secret not configured" in Apps Script logs.**
+The `SYNC_SECRET` Script Property has not been set. Follow Step 2 above.
 
-**I see an "Unauthorized" error in Apps Script logs.**
+**"Unauthorized" in Apps Script logs.**
 The secret sent by the app does not match the one stored in Script Properties.
 Check both values for typos or extra spaces.
 
-**Rows are being duplicated instead of updated.**
-This happens when the date or gig name in an incoming entry doesn't exactly
-match what's already in the sheet. Check for inconsistent date formatting or
-gig name changes.
+**"Unknown gig" in Apps Script logs.**
+The gig name sent by the app does not match any default or configured gig. Check
+that the gig name in Gig Config matches the Script Property key exactly including
+capitalization (e.g. `GIG_EARNINGS_COL_DoorDash` requires the gig to be named
+`DoorDash` in the app, not `Doordash` or `door dash`).
 
-**I redeployed my script and sync stopped working.**
+**"Sheet tab not found" in Apps Script logs.**
+The tab name calculated by the app does not match any tab in your spreadsheet.
+Confirm your tabs are named in `MM/DD/YY` format using the Sunday end-of-cycle
+date, and that the week start day configured in Gig Config matches your actual
+pay cycle.
+
+**"No row found matching date" in Apps Script logs.**
+The script found the correct tab but could not find a row containing the entry's
+date in the expected date column. Check that `DATA_START_ROW` and `DATA_END_ROW`
+are correct and that the date column number for that gig is configured accurately.
+
+**Sync stopped working after redeploying.**
 Each new deployment gets a new URL. Copy the updated URL from
 **Deploy → Manage deployments** and update it in App Settings.
 
@@ -157,4 +248,5 @@ Each new deployment gets a new URL. Copy the updated URL from
 - The sync secret is stored in your browser's localStorage on your device.
   Avoid using Gig Tracker's sync feature on shared or public devices.
 - If you believe your endpoint has been compromised, change the `SYNC_SECRET`
-  script property immediately and update the value in App Settings.
+  Script Property immediately and update the value in App Settings. You do not
+  need to redeploy the script — the new secret takes effect immediately.

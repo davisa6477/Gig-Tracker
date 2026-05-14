@@ -298,9 +298,22 @@ export default function App() {
       const inp = document.getElementById(`inp-${g.id}`) as HTMLInputElement;
       const val = parseFloat(inp?.value || '') || 0;
       if (val === 0 && (!inp || inp.value === '')) return;
-      const week = weekHistory.find(w => w.key === weekKey);
+
+      // Replace mode: the saved value will be exactly val, so only block if val itself is negative
+      if (g.behavior !== 'add') {
+        if (val < 0) offending.push(g.id);
+        return;
+      }
+
+      // Additive mode: look up the existing value using the gig's own weekStart
+      // to ensure we find the correct week bucket in weekHistory
+      const d = dateOnly(effKey);
+      const daysBack = (jsToOur(d.getDay()) - DAY_IDX[g.weekStart] + 7) % 7;
+      const cycleStart = addDays(d, -daysBack);
+      const gigWeekKey = fmtDateKey(addDays(cycleStart, -jsToOur(cycleStart.getDay())));
+      const week = weekHistory.find(w => w.key === gigWeekKey);
       const ex = parseFloat(week?.data?.[g.id]?.[effKey] as any) || 0;
-      const result = g.behavior === 'add' ? Number((ex + val).toFixed(2)) : Number(val.toFixed(2));
+      const result = Number((ex + val).toFixed(2));
       if (result < 0) offending.push(g.id);
     });
 
@@ -309,7 +322,14 @@ export default function App() {
       const miInp = document.getElementById(`mi-${g.id}`) as HTMLInputElement;
       const mVal = parseFloat(miInp?.value || '') || 0;
       if (mVal === 0 && (!miInp || miInp.value === '')) return;
-      const week = weekHistory.find(w => w.key === weekKey);
+
+      // Use the gig's own weekStart to find the correct week bucket, matching
+      // the same logic used for the earnings validation above
+      const d = dateOnly(effKey);
+      const daysBack = (jsToOur(d.getDay()) - DAY_IDX[g.weekStart] + 7) % 7;
+      const cycleStart = addDays(d, -daysBack);
+      const gigWeekKey = fmtDateKey(addDays(cycleStart, -jsToOur(cycleStart.getDay())));
+      const week = weekHistory.find(w => w.key === gigWeekKey);
       const exM = parseFloat(week?.miles?.[g.id]?.[effKey] as any) || 0;
       if (exM + mVal < 0) milesOffending.push(g.id);
     });
