@@ -37,7 +37,7 @@ export default function App() {
   const [gigs, setGigs] = useState<any[]>(() => JSON.parse(localStorage.getItem('gigs') || 'null') || []);
   const [weekHistory, setWeekHistory] = useState<any[]>(() => JSON.parse(localStorage.getItem('weekHistory') || '[]'));
   const [sheetSyncUrl, setSheetSyncUrl] = useState(() => localStorage.getItem('sheetSyncUrl') || '');
-  const [sheetSyncEnabled, setSheetSyncEnabled] = useState(() => localStorage.getItem('sheetSyncEnabled') === 'true');
+  const [sheetSyncEnabled, setSheetSyncEnabled] = useState(() => localStorage.getItem('sheetSyncEnabled') === 'true' || false);
   const [sheetSyncSecret, setSheetSyncSecret] = useState(() => localStorage.getItem('sheetSyncSecret') || '');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [reportWeekIndex, setReportWeekIndex] = useState(0);
@@ -298,22 +298,9 @@ export default function App() {
       const inp = document.getElementById(`inp-${g.id}`) as HTMLInputElement;
       const val = parseFloat(inp?.value || '') || 0;
       if (val === 0 && (!inp || inp.value === '')) return;
-
-      // Replace mode: the saved value will be exactly val, so only block if val itself is negative
-      if (g.behavior !== 'add') {
-        if (val < 0) offending.push(g.id);
-        return;
-      }
-
-      // Additive mode: look up the existing value using the gig's own weekStart
-      // to ensure we find the correct week bucket in weekHistory
-      const d = dateOnly(effKey);
-      const daysBack = (jsToOur(d.getDay()) - DAY_IDX[g.weekStart] + 7) % 7;
-      const cycleStart = addDays(d, -daysBack);
-      const gigWeekKey = fmtDateKey(addDays(cycleStart, -jsToOur(cycleStart.getDay())));
-      const week = weekHistory.find(w => w.key === gigWeekKey);
+      const week = weekHistory.find(w => w.key === weekKey);
       const ex = parseFloat(week?.data?.[g.id]?.[effKey] as any) || 0;
-      const result = Number((ex + val).toFixed(2));
+      const result = g.behavior === 'add' ? Number((ex + val).toFixed(2)) : Number(val.toFixed(2));
       if (result < 0) offending.push(g.id);
     });
 
@@ -322,14 +309,7 @@ export default function App() {
       const miInp = document.getElementById(`mi-${g.id}`) as HTMLInputElement;
       const mVal = parseFloat(miInp?.value || '') || 0;
       if (mVal === 0 && (!miInp || miInp.value === '')) return;
-
-      // Use the gig's own weekStart to find the correct week bucket, matching
-      // the same logic used for the earnings validation above
-      const d = dateOnly(effKey);
-      const daysBack = (jsToOur(d.getDay()) - DAY_IDX[g.weekStart] + 7) % 7;
-      const cycleStart = addDays(d, -daysBack);
-      const gigWeekKey = fmtDateKey(addDays(cycleStart, -jsToOur(cycleStart.getDay())));
-      const week = weekHistory.find(w => w.key === gigWeekKey);
+      const week = weekHistory.find(w => w.key === weekKey);
       const exM = parseFloat(week?.miles?.[g.id]?.[effKey] as any) || 0;
       if (exM + mVal < 0) milesOffending.push(g.id);
     });
@@ -735,26 +715,6 @@ export default function App() {
             <div><div className="settings-label">Theme</div><div className="settings-sub">App brightness</div></div>
             <div className="seg">{['light', 'auto', 'dark'].map(t => <button key={t} className={theme === t ? 'active' : ''} onClick={() => setThemeState(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>)}</div>
           </div>
-          <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
-            <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
-              <div>
-                <div className="settings-label">Google Sheets sync</div>
-                <div className="settings-sub">Advanced feature for superusers with their own sheet endpoint.</div>
-              </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px' }}>
-                <input type="checkbox" checked={sheetSyncEnabled} onChange={e => setSheetSyncEnabled(e.target.checked)} />
-                <span>{sheetSyncEnabled ? 'Enabled' : 'Disabled'}</span>
-              </label>
-            </div>
-            <div style={{ width: '100%', marginBottom: '10px' }}>
-              <div style={{ marginBottom: '8px' }}><div className="settings-label">Sync endpoint URL</div><div className="settings-sub">Saved locally in this browser; use only your own Sheets sync endpoint.</div></div>
-              <input type="text" value={sheetSyncUrl} onChange={e => setSheetSyncUrl(e.target.value)} placeholder="https://your-sheet-sync-endpoint" style={{ width: '100%', maxWidth: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }} />
-            </div>
-            <div style={{ width: '100%' }}>
-              <div style={{ marginBottom: '8px' }}><div className="settings-label">Sync secret</div><div className="settings-sub">Optional token for private Apps Script endpoints.</div></div>
-              <input type="text" value={sheetSyncSecret} onChange={e => setSheetSyncSecret(e.target.value)} placeholder="Optional secret token" style={{ width: '100%', maxWidth: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }} />
-            </div>
-          </div>
           <div className="section-label-plain has-help" {...longPress('Data Management', 'Backup your data to a file or restore it from a previous backup.')}>Backup <HelpIcon /></div>
           <button className="settings-action-btn" onClick={backupToFile}><i className="ti ti-download"></i><div><div className="settings-label">Save to device</div><div className="settings-sub">Download JSON file</div></div></button>
           <button className="settings-action-btn" onClick={() => window.location.href = `mailto:?subject=Backup&body=${encodeURIComponent(JSON.stringify({ version: '1.0', gigs, weekHistory }))}`}><i className="ti ti-mail"></i><div><div className="settings-label">Email backup</div><div className="settings-sub">Send to yourself</div></div></button>
@@ -763,6 +723,41 @@ export default function App() {
           <div className="section-label-plain">Support</div>
           <div className="donate-note">Enjoying the beta? Tips help a lot!</div>
           <button className="donate-btn" onClick={() => { const s = Date.now(); window.location.href = VENMO_DEEP; setTimeout(() => { if (Date.now() - s < 1500) window.open(VENMO_WEB, '_blank'); }, 1200); }}><i className="ti ti-heart"></i> Tip via Venmo</button>
+          <div className="section-label-plain has-help" {...longPress('Google Sheets Sync', 'Advanced feature. Syncs your earnings to a Google Sheet after every Update. Requires your own Apps Script endpoint and sync secret.')}>Google Sheets Sync <HelpIcon /></div>
+          <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+            <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: sheetSyncEnabled ? '12px' : '0' }}>
+              <div>
+                <div className="settings-label">Sync to Google Sheets</div>
+                <div className="settings-sub">Sends earnings to your own sheet endpoint after every Update.</div>
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px' }}>
+                <input type="checkbox" checked={sheetSyncEnabled} onChange={e => {
+                  const enabling = e.target.checked;
+                  if (enabling) {
+                    setHelpModal({ title: 'Enable Google Sheets Sync?', body: 'This is an advanced feature. Your earnings will be sent to an external endpoint after every Update. Only enable this if you have configured your own Apps Script endpoint and sync secret. See SHEETS_SYNC_GUIDE.md in the repository for setup instructions.' });
+                  }
+                  setSheetSyncEnabled(enabling);
+                }} />
+                <span>{sheetSyncEnabled ? 'Enabled' : 'Disabled'}</span>
+              </label>
+            </div>
+            {sheetSyncEnabled && (
+              <>
+                <div style={{ width: '100%', marginBottom: '10px', padding: '10px 12px', borderRadius: '8px', background: 'var(--warn-bg)', border: '1px solid var(--warn-text)', marginBottom: '12px' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--warn-text)', fontWeight: 600, marginBottom: '3px' }}>⚠ Advanced feature</div>
+                  <div style={{ fontSize: '12px', color: 'var(--warn-text)', lineHeight: 1.5 }}>Ensure your endpoint URL and sync secret are correct before using. Your data is always saved locally regardless of sync status.</div>
+                </div>
+                <div style={{ width: '100%', marginBottom: '10px' }}>
+                  <div style={{ marginBottom: '8px' }}><div className="settings-label">Sync endpoint URL</div><div className="settings-sub">Your deployed Apps Script web app URL.</div></div>
+                  <input type="text" value={sheetSyncUrl} onChange={e => setSheetSyncUrl(e.target.value)} placeholder="https://script.google.com/macros/s/..." disabled={!sheetSyncEnabled} style={{ width: '100%', maxWidth: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: sheetSyncEnabled ? 'var(--surface)' : 'var(--total-bg)', color: sheetSyncEnabled ? 'var(--text)' : 'var(--text3)', opacity: sheetSyncEnabled ? 1 : 0.5 }} />
+                </div>
+                <div style={{ width: '100%' }}>
+                  <div style={{ marginBottom: '8px' }}><div className="settings-label">Sync secret</div><div className="settings-sub">Must match the SYNC_SECRET set in your Apps Script properties.</div></div>
+                  <input type="text" value={sheetSyncSecret} onChange={e => setSheetSyncSecret(e.target.value)} placeholder="Your sync secret" disabled={!sheetSyncEnabled} style={{ width: '100%', maxWidth: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: sheetSyncEnabled ? 'var(--surface)' : 'var(--total-bg)', color: sheetSyncEnabled ? 'var(--text)' : 'var(--text3)', opacity: sheetSyncEnabled ? 1 : 0.5 }} />
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
 
